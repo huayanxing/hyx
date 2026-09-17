@@ -1,0 +1,22 @@
+name = "wb-sync"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# 用 wrangler 部署时才需要这个文件。
+# 在网页控制台里直接粘贴代码的话，可以忽略本文件。
+#
+# 部署步骤：
+#   npx wrangler kv namespace create WB          # 记下输出的 id
+#   npx wrangler secret put WB_KEY               # 粘贴同步口令
+#   把下面的 id 换成上一步拿到的 id
+#   npx wrangler deploy
+
+[[kv_namespaces]]
+binding = "WB"
+id = "在这里填入 KV 命名空间 id"
+
+# 可选：想让同一个 Worker 承载多套互不相通的数据（例如给同事各一份），
+# 取消下面两行的注释并给每人不同的值即可。
+# [vars]
+# WB_NS = "wb"
