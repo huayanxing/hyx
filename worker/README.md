@@ -19,13 +19,32 @@
 
 ### 第 2 步：建 Worker
 
-**Workers & Pages** → **Create** → **Workers** → **Create Worker**
+**Workers & Pages** → **Create** → **Workers** → 选 **Start with Hello World!**
 名字填 `wb-sync`（这个名字会变成你的访问地址），点 **Deploy**。
+
+> 直达链接（把 `wb-sync` 换成你自己的名字即可直接进详情页）：
+> `https://dash.cloudflare.com/?to=/:account/workers/services/view/wb-sync/production`
 
 ### 第 3 步：粘贴代码
 
-进入刚建好的 Worker → **Edit code** → 把编辑器里的示例代码**全部删掉**，
+进入刚建好的 Worker → 右上角 **Edit Code**（带 `</>` 图标）→ 把编辑器里的示例代码**全部删掉**，
 粘贴本目录 `worker.js` 的完整内容 → **Deploy**。
+
+#### 找不到 Edit Code 按钮？
+
+官方文档里这个按钮至今仍叫 `Edit Code`，位置在 **Worker 详情页右上角**，没有删掉。
+看不到通常是下面三种情况：
+
+| 情况 | 你看到的界面 | 怎么办 |
+| --- | --- | --- |
+| **① 还在列表页** | 停在 Workers & Pages 的列表，没点进具体 Worker | 点 **Worker 的名字**进去（点名字，不是右边的 `…` 菜单） |
+| **② 建成了 Pages 项目** | 页面上写的是 Pages，右上角只有 Create deployment | Pages 项目没有代码编辑器，**删掉重建一个 Worker** |
+| **③ 走的是 Git 连接 / 用 Wrangler 推过** | 右上角变成部署信息或版本号，没有编辑器 | 这两种模式下 Cloudflare 会锁成「脚本工作流」，代码只能从 Git 推。**新建一个 Worker** 重新走第 2 步 |
+
+还有两个万能办法：
+
+- **左侧导航搜索框直接输入 `Workers`**（界面改过好几次版，搜比按位置找可靠）
+- 或走「**Create → Start with Hello World!**」新建一个 —— 这条路径创建完**一定会**把编辑器摆在你面前
 
 ### 第 4 步：绑定 KV（不绑定会返回 `kv-not-bound`）
 
