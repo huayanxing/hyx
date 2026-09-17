@@ -5814,6 +5814,21 @@ renderers.settings = function() {
     '<button class="btn btn-default" onclick="showSnapPanel()">查看自动快照（' + snapList().length + '/' + SNAP_MAX + ' 份）</button>' +
     '<label class="muted" style="font-size:13px;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" ' + (bkConf().dailyFile ? 'checked' : '') + ' onchange="toggleDailyFile(this.checked)"> 每日自动下载备份文件</label></div>' +
     '<div id="snap-panel"></div></div>' +
+    '<div class="card"><div class="card-title">☁️ 云同步（多设备）</div>' +
+    '<p class="muted" style="font-size:12px;margin-bottom:8px;line-height:1.7">当前通道：<b>' + wbSyncModeText() + '</b>。<br>' +
+    '浏览器本地存储是按「设备 + 网址」隔离的，换台电脑打开自然是空的。要让手机和电脑看到同一份数据，需要一个云端中转：' +
+    '自建后台是一个单文件 Cloudflare Worker + KV（个人用量在免费额度内），把它的地址和口令填在下面即可。' +
+    '口令只保存在本机浏览器，<b>导出的数据文件里不含口令</b>。</p>' +
+    '<div class="form-row">' +
+    '<div class="form-group"><label>同步服务地址</label><input id="wbc-url" placeholder="https://wb-sync.你的子域.workers.dev" value="' + esc(wbSelfCfg().url) + '"></div>' +
+    '<div class="form-group"><label>同步口令</label><input type="password" id="wbc-key" autocomplete="off" placeholder="与后端 WB_KEY 保持一致" value="' + esc(wbSelfCfg().key) + '"></div></div>' +
+    '<div class="flex gap" style="flex-wrap:wrap;align-items:center">' +
+    '<button class="btn btn-primary" onclick="saveWbCloud()">保存并连接</button>' +
+    '<button class="btn btn-default" onclick="testWbCloud()">测试连接</button>' +
+    '<button class="btn btn-default" onclick="syncWbCloudNow()">立即同步</button>' +
+    '<button class="btn btn-danger" onclick="wipeWbCloud()">清空云端</button>' +
+    '<span id="wbc-result" class="muted" style="font-size:12px;align-self:center"></span></div>' +
+    '<p class="muted" style="font-size:12px;margin-top:8px;line-height:1.7">最近一次同步：' + esc(wbCloud.lastSync || '尚未同步') + '</p></div>' +
     '<div class="card"><div class="card-title">数据管理</div><div class="flex gap">' +
     '<button class="btn btn-primary" onclick="exportData()">导出数据(JSON)</button>' +
     '<button class="btn btn-default" onclick="document.getElementById(\'import-file\').click()">导入数据(JSON)</button>' +
@@ -5821,6 +5836,97 @@ renderers.settings = function() {
     '<button class="btn btn-warning" onclick="resetAllData()">重置为示例数据</button>' +
     '<button class="btn btn-danger" onclick="clearAllData()">清空全部数据</button></div></div>';
 };
+
+// ---------- 云同步（设置页） ----------
+function wbSyncModeText() {
+  if (wbTransport && wbTransport.ready) {
+    return wbTransport.kind === 'sp' ? 'WorkBuddy 在线数据表 · 已连接' : '自建 Cloudflare Worker · 已连接';
+  }
+  var cfg = wbSelfCfg();
+  if (cfg.url && cfg.key) return '已填配置但未连接（请点「测试连接」排查）';
+  return '单机模式，数据只存本机浏览器';
+}
+// 换通道时把旧的轮询、缓存状态全部清干净，再重新初始化
+function wbCloudReinit() {
+  wbTransStop();
+  wbCloud.ready = false; wbCloud.synced = false; wbCloud.busy = false; wbCloud.dirty = false;
+  wbCloud.recIds = {}; wbCloud.lastShards = {};
+  try { wbCloudInit(); } catch (e) { wbCloudPaint('off'); }
+}
+function saveWbCloud() {
+  var url = (el('wbc-url').value || '').trim();
+  var key = (el('wbc-key').value || '').trim();
+  if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+  url = url.replace(/\/+$/, '');
+  if (!url || !key) {
+    wbSelfClear();
+    wbCloudReinit();
+    toast('已清空云同步配置，回到单机模式');
+    renderPage();
+    return;
+  }
+  wbSelfSave(url, key);
+  wbCloudReinit();
+  toast('正在连接云端…');
+  renderPage();
+}
+function testWbCloud() {
+  var out = el('wbc-result');
+  var url = (el('wbc-url').value || '').trim();
+  var key = (el('wbc-key').value || '').trim();
+  if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+  url = url.replace(/\/+$/, '');
+  if (!url || !key) { if (out) out.textContent = '请先填写地址和口令'; return; }
+  if (out) out.textContent = '连接中…';
+  var t0 = Date.now();
+  fetch(url + '/api/ping', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-wb-key': key },
+    body: '{}'
+  }).then(function(r) {
+    return r.text().then(function(txt) { var j = null; try { j = JSON.parse(txt); } catch (e) {} return { r: r, j: j }; });
+  }).then(function(o) {
+    var ms = Date.now() - t0;
+    if (o.r.ok && o.j && o.j.ok) {
+      if (out) out.textContent = '连接成功 · 云端已有 ' + (o.j.count || 0) + ' 个分片、' + (o.j.images || 0) + ' 张图片（' + ms + 'ms）';
+    } else if (o.r.status === 401) {
+      if (out) out.textContent = '口令不对（401），请和后端的 WB_KEY 核对';
+    } else if (o.r.status === 404) {
+      if (out) out.textContent = '地址不对（404），确认填的是 Worker 根地址、不要带 /api';
+    } else {
+      if (out) out.textContent = '失败：' + ((o.j && (o.j.hint || o.j.error)) || ('HTTP ' + o.r.status));
+    }
+  }).catch(function(e) {
+    if (out) out.textContent = '连不上：' + ((e && e.message) ? e.message : e) + '（确认地址能访问、且是 https）';
+  });
+}
+function syncWbCloudNow() {
+  if (!wbCloud.ready) { toast('未连接云端，请先「保存并连接」'); return; }
+  var out = el('wbc-result');
+  if (out) out.textContent = '同步中…';
+  wbCloudPull({ reason: 'manual' }).then(function(applied) {
+    if (!wbCloudLooksReal()) return 'sample';
+    return wbCloudPush().then(function() { return applied ? 'applied' : 'ok'; });
+  }).then(function(state) {
+    var msg = state === 'sample' ? '本机还是示例数据，为避免覆盖云端真实数据，已跳过上传'
+      : state === 'applied' ? '已从云端取回其他设备的更新'
+        : '已同步（云端 ' + Object.keys(wbCloud.lastShards || {}).length + ' 个分片）';
+    toast(msg);
+    renderPage();
+    var o2 = el('wbc-result'); if (o2) o2.textContent = msg;
+  }).catch(function() {
+    toast('同步失败，请检查网络与口令');
+    renderPage();
+  });
+}
+function wipeWbCloud() {
+  if (!wbCloud.ready) { toast('未连接云端'); return; }
+  if (!confirm('确定清空云端的全部数据吗？\n\n本机数据不受影响，但其他设备下次打开将取不到云端内容。\n\n（本机图片库和文档中心的文件不会被删除）')) return;
+  wbCloudWipe().then(function() {
+    toast('云端已清空');
+    renderPage();
+  });
+}
 
 function saveSettings() {
   DATA.settings.className = el('set-class').value || '初三(1)班';
@@ -8183,6 +8289,186 @@ var WB_IMG_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image
 // 「工作台云数据」表的四个字段名（建表返回的真实字段，不可臆造）
 var WB_KEY_FIELD = '分片键', WB_BODY_FIELD = '内容', WB_TS_FIELD = '更新时间', WB_DEV_FIELD = '设备';
 
+// ============================================================
+// 云同步传输层
+//   把「同步什么」（分片与合并逻辑）和「同步到哪」拆开，三种通道共用同一套上层逻辑：
+//     sp   —— WorkBuddy 在线 page 注入的数据表（仅在 workbuddy.link 环境可用）
+//     self —— 自建 Cloudflare Worker + KV（GitHub Pages 等任意静态托管都能用）
+//     off  —— 单机模式，只写本机浏览器存储
+//   统一接口：pullAll(known) / upsert(items) / wipeAll() / uploadImage(b64,ct) / subscribe(cb)
+// ============================================================
+var WB_SELF_KEY = 'banzhuren_cloud_self';
+var WB_SELF_POLL_MS = 30000;
+
+function wbSelfCfg() {
+  try {
+    var o = JSON.parse(localStorage.getItem(WB_SELF_KEY) || '{}') || {};
+    return {
+      url: String(o.url || '').trim().replace(/\/+$/, ''),
+      key: String(o.key || '')
+    };
+  } catch (e) { return { url: '', key: '' }; }
+}
+function wbSelfSave(url, key) {
+  try {
+    localStorage.setItem(WB_SELF_KEY, JSON.stringify({
+      url: String(url || '').trim().replace(/\/+$/, ''),
+      key: String(key || '')
+    }));
+  } catch (e) {}
+}
+function wbSelfClear() { try { localStorage.removeItem(WB_SELF_KEY); } catch (e) {} }
+
+// ---- 通道一：WorkBuddy 在线 page 的数据表 ----
+function wbTransSP() {
+  var db = window.__SMART_PAGE__.database;
+  var recIds = {};
+  var t = { kind: 'sp', ready: true };
+
+  t.pullAll = function() {
+    var acc = [], guard = 0;
+    function step(cursor) {
+      return db.query({ databaseId: DATABASE_ID, pageSize: 200, startCursor: cursor }).then(function(r) {
+        var rows = (r && r.results) || [];
+        acc = acc.concat(rows);
+        var next = r && r.nextCursor;
+        if (r && r.hasMore && next && next !== cursor && rows.length && guard < 100) { guard++; return step(next); }
+        return acc;
+      });
+    }
+    return step(undefined).then(function(recs) {
+      var map = {}, ts = {}, ids = {};
+      (recs || []).forEach(function(rec) {
+        if (!rec) return;
+        var k = rec[WB_KEY_FIELD];
+        if (typeof k !== 'string' || !k) return;
+        map[k] = rec[WB_BODY_FIELD];
+        ts[k] = wbCloudParseTs(rec[WB_TS_FIELD]);
+        ids[k] = rec._id || '';
+      });
+      recIds = ids;
+      return { map: map, ts: ts, ids: ids, count: (recs || []).length };
+    });
+  };
+
+  t.upsert = function(items) {
+    var res = { ok: [], stale: [], failed: [] };
+    var chain = Promise.resolve();
+    items.forEach(function(it) {
+      chain = chain.then(function() {
+        var props = {};
+        props[WB_KEY_FIELD] = { text: it.key };
+        props[WB_BODY_FIELD] = { text: it.body };
+        props[WB_TS_FIELD] = { date: it.ts };
+        props[WB_DEV_FIELD] = { text: it.dev };
+        var rid = recIds[it.key];
+        var p = rid
+          ? db.updateRecord({ databaseId: DATABASE_ID, recordId: rid, properties: props })
+          : db.addRecord({ databaseId: DATABASE_ID, properties: props }).then(function(r) {
+              var nid = r && (r.id || r._id);
+              if (nid) recIds[it.key] = nid;
+            });
+        return p.then(function() { res.ok.push(it.key); }).catch(function() { res.failed.push(it.key); });
+      });
+    });
+    return chain.then(function() { return res; });
+  };
+
+  t.wipeAll = function() {
+    return t.pullAll().then(function(r) {
+      var ids = Object.keys(r.ids).map(function(k) { return r.ids[k]; }).filter(Boolean);
+      var chain = Promise.resolve();
+      ids.forEach(function(rid) {
+        chain = chain.then(function() { return db.deleteRecord({ databaseId: DATABASE_ID, recordId: rid }).catch(function() {}); });
+      });
+      return chain.then(function() { recIds = {}; return { deleted: ids.length }; });
+    });
+  };
+
+  t.uploadImage = function(b64, ct) {
+    return db.uploadImage({ data: b64, contentType: ct, fileName: '截图.jpg' }).then(function(r) {
+      if (!r || !r.url) throw new Error('no-url');
+      return r.url;
+    });
+  };
+
+  t.subscribe = function(cb) {
+    if (typeof db.onUpdated !== 'function') return;
+    db.onUpdated(cb);
+  };
+
+  return t;
+}
+
+// ---- 通道二：自建 Cloudflare Worker + KV ----
+function wbTransSelf(cfg) {
+  var t = { kind: 'self', ready: true, url: cfg.url, poll: null };
+
+  function call(path, body) {
+    return fetch(cfg.url + '/api' + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wb-key': cfg.key },
+      body: JSON.stringify(body || {})
+    }).then(function(r) {
+      return r.text().then(function(txt) {
+        var j = null;
+        try { j = JSON.parse(txt); } catch (e) {}
+        if (!r.ok || !j || j.ok !== true) {
+          var err = new Error((j && j.error) || ('HTTP ' + r.status));
+          err.status = r.status;
+          throw err;
+        }
+        return j;
+      });
+    });
+  }
+
+  t.ping = function() { return call('/ping', {}); };
+  t.pullAll = function(known) {
+    return call('/pull', { known: known || {} }).then(function(j) {
+      return { map: j.map || {}, ts: j.ts || {}, ids: {}, count: j.count || 0 };
+    });
+  };
+  t.upsert = function(items) {
+    return call('/push', { items: items }).then(function(j) {
+      return { ok: j.okKeys || [], stale: j.stale || [], failed: j.failed || [] };
+    });
+  };
+  t.wipeAll = function() {
+    return call('/wipe', {}).then(function(j) { return { deleted: j.deleted || 0 }; });
+  };
+  t.uploadImage = function(b64, ct) {
+    return call('/img', { data: b64, contentType: ct }).then(function(j) {
+      if (!j.url) throw new Error('no-url');
+      return j.url;
+    });
+  };
+  // 自建后端没有推送通道，改用定时轮询；只在页面可见时拉，切回页面立刻拉一次
+  t.subscribe = function(cb) {
+    if (t.poll) clearInterval(t.poll);
+    t.poll = setInterval(function() { if (!document.hidden) cb(); }, WB_SELF_POLL_MS);
+    document.addEventListener('visibilitychange', function() { if (!document.hidden) cb(); });
+  };
+
+  return t;
+}
+
+// 按当前环境挑一条通道：优先 WorkBuddy 数据表，其次自建后端，都没有就单机
+function wbTransPick() {
+  if (wbCloudEnabled()) return wbTransSP();
+  var cfg = wbSelfCfg();
+  if (cfg.url && cfg.key) {
+    try { return wbTransSelf(cfg); } catch (e) {}
+  }
+  return { kind: 'off', ready: false };
+}
+
+var wbTransport = { kind: 'off', ready: false };
+
+function wbTransStop() {
+  if (wbTransport && wbTransport.poll) { clearInterval(wbTransport.poll); wbTransport.poll = null; }
+}
+
 var wbCloud = {
   db: null, ready: false, applying: false, busy: false, dirty: false,
   timer: null, upTimer: null, recIds: {}, lastShards: {}, state: 'off', lastSync: '', booted: false,
@@ -8288,37 +8574,11 @@ function wbOrderGradeExams(val) {
   }
   if (out.length === exams.length) g.exams = out;
 }
-// 翻页拉全量（单次 query 只回一页，三重防呆缺一不可）
-function wbCloudLoadAll() {
-  var acc = [], guard = 0;
-  function step(cursor) {
-    return wbCloud.db.query({ databaseId: DATABASE_ID, pageSize: 200, startCursor: cursor }).then(function(r) {
-      var rows = (r && r.results) || [];
-      acc = acc.concat(rows);
-      var next = r && r.nextCursor;
-      if (r && r.hasMore && next && next !== cursor && rows.length && guard < 100) {
-        guard++;
-        return step(next);
-      }
-      return acc;
-    });
-  }
-  return step(undefined);
-}
 // 读取云端全部分片 → { map, ts, ids, count }
+// 传入本机已知的云端时间戳，自建通道只回传有变动的分片正文，省流量
 function wbCloudFetch() {
-  return wbCloudLoadAll().then(function(recs) {
-    var map = {}, ts = {}, ids = {};
-    (recs || []).forEach(function(rec) {
-      if (!rec) return;
-      var k = rec[WB_KEY_FIELD];
-      if (typeof k !== 'string' || !k) return;
-      map[k] = rec[WB_BODY_FIELD];
-      ts[k] = wbCloudParseTs(rec[WB_TS_FIELD]);
-      ids[k] = rec._id || '';
-    });
-    return { map: map, ts: ts, ids: ids, count: (recs || []).length };
-  });
+  if (!wbTransport.ready) return Promise.resolve({ map: {}, ts: {}, ids: {}, count: 0 });
+  return wbTransport.pullAll(wbCloudMeta().shards || {});
 }
 
 function wbCloudLooksReal() {
@@ -8329,7 +8589,8 @@ function wbCloudPull(opts) {
   opts = opts || {};
   if (!wbCloud.ready || wbCloud.busy) return Promise.resolve(false);
   wbCloud.busy = true;
-  if (opts.reason !== 'boot') wbCloudPaint('syncing');
+  // 轮询是背景行为，不闪「同步中…」，免得每 30 秒晃一下
+  if (opts.reason !== 'boot' && opts.reason !== 'poll') wbCloudPaint('syncing');
   return wbCloudFetch().then(function(res) {
     wbCloud.recIds = res.ids;
     wbCloud.lastShards = res.map;
@@ -8417,55 +8678,46 @@ function wbCloudPush(force) {
   var meta = wbCloudMeta();
   meta.shards = meta.shards || {};
   var metaTs = Date.now();
-  var failed = 0;
-  var chain = Promise.resolve();
-  changed.forEach(function(k) {
-    chain = chain.then(function() {
-      var props = {};
-      props[WB_KEY_FIELD] = { text: k };
-      props[WB_BODY_FIELD] = { text: shards[k] };
-      props[WB_TS_FIELD] = { date: ts };
-      props[WB_DEV_FIELD] = { text: dev };
-      var rid = wbCloud.recIds[k];
-      var p = rid
-        ? wbCloud.db.updateRecord({ databaseId: DATABASE_ID, recordId: rid, properties: props })
-        : wbCloud.db.addRecord({ databaseId: DATABASE_ID, properties: props }).then(function(res) {
-            var nid = res && (res.id || res._id);
-            if (nid) wbCloud.recIds[k] = nid;
-            return nid;
-          });
-      return p.then(function() {
-        wbCloud.lastShards[k] = shards[k];
-        meta.shards[k] = metaTs;
-      }).catch(function() { failed++; });
-    });
-  });
-  return chain.then(function() {
+  var items = changed.map(function(k) { return { key: k, body: shards[k], ts: ts, dev: dev }; });
+  return wbTransport.upsert(items).then(function(res) {
+    var oks = (res && res.ok) || [];
+    oks.forEach(function(k) { wbCloud.lastShards[k] = shards[k]; meta.shards[k] = metaTs; });
     wbCloudSetMeta(meta);
     wbCloud.busy = false;
     wbCloud.lastSync = fmtDateTime(Date.now());
-    if (failed) { wbCloudPaint('err', failed + ' 个分片未同步'); wbCloud.dirty = true; }
-    else { wbCloudPaint('ok', wbCloud.lastSync); }
-    if (!Object.keys(wbCloud.recIds).length) {
-      return wbCloudFetch().then(function(r2) { wbCloud.recIds = r2.ids; });
+    var failed = (res && res.failed) || [];
+    var stale = (res && res.stale) || [];
+    if (failed.length) {
+      wbCloudPaint('err', failed.length + ' 个分片未同步');
+      wbCloud.dirty = true;
+    } else if (stale.length) {
+      // 云端那几片比本机新（别的设备刚改过）→ 本机这份作废，立刻取回最新的
+      wbCloudPaint('idle', '其他设备刚改过，正在取回');
+      wbCloudPull({ reason: 'remote' });
+    } else {
+      wbCloudPaint('ok', wbCloud.lastSync);
     }
   }).catch(function() {
     wbCloud.busy = false;
     wbCloudPaint('err', '网络或权限异常');
   });
 }
-// 别的设备改了 → 自动拉一次（整页只注册一个 handler）
+// 别的设备改了 → 自动拉一次（整页只注册一次）
 function wbCloudSubscribe() {
-  if (!wbCloud.db || typeof wbCloud.db.onUpdated !== 'function') return;
-  wbCloud.db.onUpdated(function(payload) {
-    var ids = (payload && payload.databaseIds) || [];
-    if (ids.indexOf(DATABASE_ID) === -1) return;
+  if (!wbTransport.ready || typeof wbTransport.subscribe !== 'function') return;
+  wbTransport.subscribe(function(payload) {
+    var reason = 'poll';
+    if (wbTransport.kind === 'sp') {
+      var ids = (payload && payload.databaseIds) || [];
+      if (ids.indexOf(DATABASE_ID) === -1) return;
+      reason = 'remote';   // 数据表是推送式的，算「远端有更新」
+    }
     if (wbCloud.applying) return;
     if (wbCloud.upTimer) clearTimeout(wbCloud.upTimer);
     wbCloud.upTimer = setTimeout(function() {
       wbCloud.upTimer = null;
-      if (wbCloud.busy) { wbCloud.upTimer = setTimeout(function() { wbCloud.upTimer = null; wbCloudPull({ reason: 'remote' }); }, 800); return; }
-      wbCloudPull({ reason: 'remote' });
+      if (wbCloud.busy) { wbCloud.upTimer = setTimeout(function() { wbCloud.upTimer = null; wbCloudPull({ reason: reason }); }, 800); return; }
+      wbCloudPull({ reason: reason });
     }, 400);
   });
 }
@@ -8478,8 +8730,8 @@ function wbCloudUploadImage(dataUrl, cb) {
   var ct = (mt && mt[1] ? mt[1] : 'image/jpeg').toLowerCase();
   if (WB_IMG_TYPES.indexOf(ct) < 0) ct = 'image/jpeg';
   if (Math.floor(b64.length * 3 / 4) > 10 * 1024 * 1024) { cb(null, '图片超过 10MB'); return; }
-  wbCloud.db.uploadImage({ data: b64, contentType: ct, fileName: '截图.jpg' }).then(function(res) {
-    var url = res && res.url;
+  if (!wbTransport.ready || typeof wbTransport.uploadImage !== 'function') { cb(null, '当前未启用云同步'); return; }
+  wbTransport.uploadImage(b64, ct).then(function(url) {
     if (!url) throw new Error('no-url');
     cb(url, null);
   }).catch(function() { cb(null, '云端上传失败'); });
@@ -8522,8 +8774,8 @@ function wbCloudBackfillImages() {
   }).catch(function() { return n; });
 }
 function wbCloudInit() {
-  wbCloud.db = wbCloudEnabled() ? window.__SMART_PAGE__.database : null;
-  if (!wbCloud.db) { wbCloudPaint('off'); wbCloud.booted = true; return; }
+  wbTransport = wbTransPick();
+  if (!wbTransport.ready) { wbCloudPaint('off'); wbCloud.booted = true; return; }
   wbCloud.ready = true;
   wbCloud.booted = true;
   wbCloudPaint('idle');
@@ -8540,20 +8792,11 @@ function wbCloudInit() {
 }
 // 清空云端（跟随「清空全部数据」一起执行，保证各设备看到的一致）
 function wbCloudWipe() {
-  if (!wbCloud.ready) { wbCloudClearMeta(); return Promise.resolve(); }
-  return wbCloudFetch().then(function(res) {
-    var ids = Object.keys(res.ids).map(function(k) { return res.ids[k]; }).filter(Boolean);
-    var chain = Promise.resolve();
-    ids.forEach(function(rid) {
-      chain = chain.then(function() {
-        return wbCloud.db.deleteRecord({ databaseId: DATABASE_ID, recordId: rid }).catch(function() {});
-      });
-    });
-    return chain.then(function() {
-      wbCloudClearMeta();
-      wbCloud.recIds = {}; wbCloud.lastShards = {}; wbCloud.synced = true;
-      wbCloudPaint('empty');
-    });
+  if (!wbTransport.ready) { wbCloudClearMeta(); return Promise.resolve(); }
+  return wbTransport.wipeAll().then(function() {
+    wbCloudClearMeta();
+    wbCloud.recIds = {}; wbCloud.lastShards = {}; wbCloud.synced = true;
+    wbCloudPaint('empty');
   }).catch(function() { wbCloudClearMeta(); });
 }
 // 本机数据重置为示例时不擦云端，只清同步记录，下次打开会自动把云端真实数据取回来
