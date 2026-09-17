@@ -8511,6 +8511,28 @@ function wbCloudPaint(state, extra) {
   chip.setAttribute('data-sp-bindable', 'database');
   chip.setAttribute('data-sp-database-id', DATABASE_ID);
 }
+// 把底层错误翻译成人看得懂的一句话（原先用大兜底 catch，真实原因被吞掉了）
+function wbErrWhy(e) {
+  var msg = (e && e.message) || String(e || '');
+  var st = (e && e.status) || 0;
+  if (st === 401 || msg === 'bad-key') return { s: '口令不对(401)', f: '口令不对（401）：浏览器里填的口令与后端 WB_KEY 不一致，请逐字符核对（注意首尾空格）' };
+  if (st === 404 || msg === 'not-found') return { s: '地址不对(404)', f: '地址不对（404）：确认填的是 Worker 根地址，末尾不要带 /api' };
+  if (msg === 'kv-not-bound') return { s: '后端未绑定 KV', f: '后端没绑定 KV：请在 Worker 的 Settings → Bindings 里检查变量名是否正好是 WB' };
+  if (msg === 'key-not-set') return { s: '后端未设口令', f: '后端没有 WB_KEY：请在 Settings → Variables and Secrets 里加一个 Secret 类型的 WB_KEY' };
+  if (msg === 'server-error') return { s: '后端内部错误', f: '后端内部错误（500）：请到 Cloudflare 该 Worker 的 Logs 里看具体报错' };
+  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(msg)) return { s: '连不上后端', f: '连不上后端：可能是地址写错、workers.dev 子域尚未生效，或本机网络/代理拦截了该域名' };
+  if (st) return { s: 'HTTP ' + st, f: '请求被拒（HTTP ' + st + '）' + (msg ? '：' + msg : '') };
+  return { s: '未知错误', f: '未知错误：' + (msg || '无错误信息') };
+}
+// 同步失败统一处理：顶部芯片给短原因，设置页给完整原因，控制台留原始错误对象
+function wbCloudFail(e, where) {
+  var w = wbErrWhy(e);
+  wbCloud.lastError = w.f;
+  wbCloudPaint('err', w.s);
+  var out = el('wbc-result');
+  if (out) out.textContent = '同步失败（' + (where || '同步') + '）：' + w.f;
+  try { console.warn('[云同步] ' + (where || '') + ' → ' + w.f, e); } catch (x) {}
+}
 // 把 DATA 切成 分片键 -> JSON 字符串
 function wbShardsFrom(data) {
   var out = {}, k, g, meta = {}, exs = [], order = [];
@@ -8646,9 +8668,9 @@ function wbCloudPull(opts) {
     wbCloud.lastSync = fmtDateTime(Date.now());
     wbCloudPaint('ok', wbCloud.lastSync);
     return false;
-  }).catch(function() {
+  }).catch(function(e) {
     wbCloud.busy = false;
-    wbCloudPaint('err', '网络或权限异常');
+    wbCloudFail(e, '拉取');
     return false;
   });
 }
@@ -8697,9 +8719,9 @@ function wbCloudPush(force) {
     } else {
       wbCloudPaint('ok', wbCloud.lastSync);
     }
-  }).catch(function() {
+  }).catch(function(e) {
     wbCloud.busy = false;
-    wbCloudPaint('err', '网络或权限异常');
+    wbCloudFail(e, '上传');
   });
 }
 // 别的设备改了 → 自动拉一次（整页只注册一次）
