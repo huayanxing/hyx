@@ -5817,10 +5817,12 @@ renderers.settings = function() {
     '<div class="card"><div class="card-title">☁️ 云同步（多设备）</div>' +
     '<p class="muted" style="font-size:12px;margin-bottom:8px;line-height:1.7">当前通道：<b>' + wbSyncModeText() + '</b>。<br>' +
     '浏览器本地存储是按「设备 + 网址」隔离的，换台电脑打开自然是空的。要让手机和电脑看到同一份数据，需要一个云端中转：' +
-    '自建后台是一个单文件 Cloudflare Worker + KV（个人用量在免费额度内），把它的地址和口令填在下面即可。' +
+    '自建后台是一个单文件 Cloudflare 后端（Pages / Worker + KV，个人用量在免费额度内），把它的地址和口令填在下面即可。' +
+    '<b>地址不要用 workers.dev</b>（该域名在国内被 DNS 污染，一定连不上），推荐 https://你的项目名.pages.dev ——' +
+    '从该网址打开本页时，地址会自动填好，你只需填口令。' +
     '口令只保存在本机浏览器，<b>导出的数据文件里不含口令</b>。</p>' +
     '<div class="form-row">' +
-    '<div class="form-group"><label>同步服务地址</label><input id="wbc-url" placeholder="https://wb-sync.你的子域.workers.dev" value="' + esc(wbSelfCfg().url) + '"></div>' +
+    '<div class="form-group"><label>同步服务地址</label><input id="wbc-url" placeholder="https://你的项目名.pages.dev" value="' + esc(wbSelfCfg().url) + '"></div>' +
     '<div class="form-group"><label>同步口令</label><input type="password" id="wbc-key" autocomplete="off" placeholder="与后端 WB_KEY 保持一致" value="' + esc(wbSelfCfg().key) + '"></div></div>' +
     '<div class="flex gap" style="flex-wrap:wrap;align-items:center">' +
     '<button class="btn btn-primary" onclick="saveWbCloud()">保存并连接</button>' +
@@ -5840,7 +5842,7 @@ renderers.settings = function() {
 // ---------- 云同步（设置页） ----------
 function wbSyncModeText() {
   if (wbTransport && wbTransport.ready) {
-    return wbTransport.kind === 'sp' ? 'WorkBuddy 在线数据表 · 已连接' : '自建 Cloudflare Worker · 已连接';
+    return wbTransport.kind === 'sp' ? 'WorkBuddy 在线数据表 · 已连接' : '自建后端 · 已连接';
   }
   var cfg = wbSelfCfg();
   if (cfg.url && cfg.key) return '已填配置但未连接（请点「测试连接」排查）';
@@ -5854,7 +5856,7 @@ function wbCloudReinit() {
   try { wbCloudInit(); } catch (e) { wbCloudPaint('off'); }
 }
 function saveWbCloud() {
-  var url = (el('wbc-url').value || '').trim();
+  var url = (el('wbc-url').value || '').trim() || wbSelfAutoUrl();
   var key = (el('wbc-key').value || '').trim();
   if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
   url = url.replace(/\/+$/, '');
@@ -5872,7 +5874,7 @@ function saveWbCloud() {
 }
 function testWbCloud() {
   var out = el('wbc-result');
-  var url = (el('wbc-url').value || '').trim();
+  var url = (el('wbc-url').value || '').trim() || wbSelfAutoUrl();
   var key = (el('wbc-key').value || '').trim();
   if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
   url = url.replace(/\/+$/, '');
@@ -5897,7 +5899,11 @@ function testWbCloud() {
       if (out) out.textContent = '失败：' + ((o.j && (o.j.hint || o.j.error)) || ('HTTP ' + o.r.status));
     }
   }).catch(function(e) {
-    if (out) out.textContent = '连不上：' + ((e && e.message) ? e.message : e) + '（确认地址能访问、且是 https）';
+    if (/workers\.dev/i.test(url)) {
+      if (out) out.textContent = '连不上：地址 ' + url + ' 用的是 workers.dev —— 该域名在国内被 DNS 污染，浏览器连不上。请改用 https://你的项目名.pages.dev';
+    } else {
+      if (out) out.textContent = '连不上：' + ((e && e.message) ? e.message : e) + '（地址 ' + url + '：请确认它能访问、且是 https）';
+    }
   });
 }
 function syncWbCloudNow() {
@@ -8300,14 +8306,22 @@ var WB_KEY_FIELD = '分片键', WB_BODY_FIELD = '内容', WB_TS_FIELD = '更新�
 var WB_SELF_KEY = 'banzhuren_cloud_self';
 var WB_SELF_POLL_MS = 30000;
 
+// 网页本身就是从 Pages 部署打开的 → 同一域名下就有同步接口，地址可以自动填好
+function wbSelfAutoUrl() {
+  try {
+    if (location.protocol === 'https:' && /\.pages\.dev$/i.test(location.hostname)) return location.origin;
+  } catch (e) {}
+  return '';
+}
 function wbSelfCfg() {
   try {
     var o = JSON.parse(localStorage.getItem(WB_SELF_KEY) || '{}') || {};
+    var u = String(o.url || '').trim().replace(/\/+$/, '');
     return {
-      url: String(o.url || '').trim().replace(/\/+$/, ''),
+      url: u || wbSelfAutoUrl(),
       key: String(o.key || '')
     };
-  } catch (e) { return { url: '', key: '' }; }
+  } catch (e) { return { url: wbSelfAutoUrl(), key: '' }; }
 }
 function wbSelfSave(url, key) {
   try {
@@ -8520,7 +8534,17 @@ function wbErrWhy(e) {
   if (msg === 'kv-not-bound') return { s: '后端未绑定 KV', f: '后端没绑定 KV：请在 Worker 的 Settings → Bindings 里检查变量名是否正好是 WB' };
   if (msg === 'key-not-set') return { s: '后端未设口令', f: '后端没有 WB_KEY：请在 Settings → Variables and Secrets 里加一个 Secret 类型的 WB_KEY' };
   if (msg === 'server-error') return { s: '后端内部错误', f: '后端内部错误（500）：请到 Cloudflare 该 Worker 的 Logs 里看具体报错' };
-  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(msg)) return { s: '连不上后端', f: '连不上后端：可能是地址写错、workers.dev 子域尚未生效，或本机网络/代理拦截了该域名' };
+  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(msg)) {
+    var badUrl = '';
+    try { badUrl = wbSelfCfg().url || ''; } catch (x) {}
+    if (/workers\.dev/i.test(badUrl)) {
+      return { s: '地址不可用', f: '连不上后端：地址用了 workers.dev —— 这个域名在国内被 DNS 污染（会被解析到 Facebook 的 IP），浏览器直连必然失败。请把地址换成 https://你的项目名.pages.dev 后重试' };
+    }
+    if (/pages\.dev/i.test(badUrl)) {
+      return { s: '连不上后端', f: '连不上后端：' + badUrl + ' 打不开。请①确认 Pages 项目已成功部署（Deployments 里是 Success）②用浏览器直接打开 ' + badUrl + '/api/ping 自检（看到 method-not-allowed 的 JSON 就说明后端通了）' };
+    }
+    return { s: '连不上后端', f: '连不上后端：可能是地址写错、域名尚未生效，或本机网络拦截了该域名（当前地址：' + (badUrl || '未填') + '）' };
+  }
   if (st) return { s: 'HTTP ' + st, f: '请求被拒（HTTP ' + st + '）' + (msg ? '：' + msg : '') };
   return { s: '未知错误', f: '未知错误：' + (msg || '无错误信息') };
 }
