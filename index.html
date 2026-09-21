@@ -9412,7 +9412,10 @@ function wbCloudPush(force) {
       wbCloud.dirty = true;
     } else if (stale.length) {
       // 云端那几片比本机新（别的设备刚改过）→ 本机这份作废，立刻取回最新的
+      // 因为不再后台轮询，本机在此之前不知道云端已变，所以必须明确告知，不能静默覆盖
       wbCloudPaint('idle', '其他设备刚改过，正在取回');
+      toast('检测到其他设备也改过同一批数据，已按云端版本取回；你这次的改动被覆盖了', 'warning');
+      try { console.warn('[云同步] 以下分片的本次改动被云端更新的版本覆盖：' + stale.join('、')); } catch (x) {}
       wbCloudPull({ reason: 'remote' });
     } else {
       wbCloudPaint('ok', wbCloud.lastSync);
