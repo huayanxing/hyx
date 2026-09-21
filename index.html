@@ -756,11 +756,17 @@ details.fhelp summary { cursor: pointer; color: var(--primary); font-weight: 600
 .wb-cloud-chip { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
 .wb-cloud-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .85; }
 .wb-cloud-off { color: #8a8a8a; background: #f2f2f2; border-color: #e2e2e2; }
+.wb-cloud-disconnected { color: #8a5a00; background: #f6efe2; border-color: #e0cfa8; }
 .wb-cloud-idle { color: #185fa5; background: #e6f1fb; border-color: #b5d4f4; }
 .wb-cloud-syncing { color: #8a5a00; background: #faeeda; border-color: #fac775; }
 .wb-cloud-ok { color: #3b6d11; background: #eaf3de; border-color: #c0dd97; }
 .wb-cloud-err { color: #a32d2d; background: #fcebeb; border-color: #f7c1c1; }
 .wb-cloud-empty { color: #5f5e5a; background: #f1efe8; border-color: #d3d1c7; }
+/* AI 辅助结果框 */
+.ai-box { background: #f7f9fc; border: 1px solid #d6e2f0; border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; line-height: 1.75; color: #22303f; }
+.ai-box-hd { font-weight: 600; color: #185fa5; margin-bottom: 6px; font-size: 12px; }
+.ai-box-bd { white-space: pre-wrap; word-break: break-word; }
+.ai-warn { background: #fff8f0; border-color: #f0d9b8; color: #8a5a00; }
 @media (max-width: 768px) { .wb-cloud-chip { font-size: 11px; padding: 2px 8px; margin-left: 6px; } }
 </style>
 </head>
@@ -912,7 +918,6 @@ const NAV_ITEMS = [
   ['homework', '📝 作业管理'],
   ['teaching', '🎓 教学教研'],
   ['students', '👥 学生信息'],
-  ['attendance', '✅ 考勤管理'],
   ['grades', '📊 成绩管理'],
   ['gradeanalysis', '📈 年级成绩分析'],
   ['career', '🎯 生涯规划'],
@@ -920,6 +925,7 @@ const NAV_ITEMS = [
   ['talks', '💬 谈心谈话'],
   ['bonus', '⭐ 加减分管理'],
   ['honors', '🏆 荣誉与处分'],
+  ['attendance', '✅ 考勤管理'],
   ['tips', '💡 班主任锦囊'],
   ['docs', '📄 文档中心'],
   ['settings', '⚙️ 设置']
@@ -3764,10 +3770,12 @@ function showGradeAnalysis(sid, eid) {
     svgChart({ h: 210, legend: false, rev0: true, labels: trLb, series: [
       { name: '排名', data: trRk, color: '#7c5ce0', type: 'line' }
     ] }) + '</div></div>';
-  html += '<div class="card"><div class="card-title">谈话记录 <span class="badge badge-info">语音转文字</span></div>' +
+  html += '<div class="card"><div class="card-title">谈话记录 <span class="badge badge-info">AI 辅助</span></div>' +
     '<textarea id="ga-talk" rows="4" style="width:100%;font-size:14px"></textarea>' +
-    '<div class="flex gap mt" style="align-items:center"><button class="btn btn-danger recording-btn" onclick="toggleRecording(\'ga-talk\')">🎤 开始录音</button>' +
-    '<span class="muted">录完后点击保存</span></div>' +
+    '<div class="flex gap mt" style="align-items:center;flex-wrap:wrap">' +
+    '<button class="btn btn-default" onclick="aiAssist(\'ga-talk\',\'ga-talk\',\'ga-talk-ai\',\'polish\')">🤖 AI 整理成文</button>' +
+    '<span class="muted" style="font-size:12px">🎤 想口述？用手机输入法键盘上的麦克风直接说话，比浏览器自带识别更准</span></div>' +
+    '<div id="ga-talk-ai"></div>' +
     '<div class="mt" style="text-align:right"><button class="btn btn-primary" onclick="saveGradeTalk(' + sid + ',\'' + esc(ex.name) + '\')">保存谈话记录</button></div></div>';
   html += '</div>';
   openModal(html, 'lg');
@@ -3982,36 +3990,132 @@ function deleteHomework(id) {
 //  谈心谈话
 // ============================================================
 renderers.talks = function() {
+  var rows = DATA.talks.slice().sort(function(a, b) { return String(b.date).localeCompare(String(a.date)); }).map(function(r) {
+    var imgs = (r.images && r.images.length) ? r.images : [];
+    return '<tr><td>' + esc(r.date) + '</td><td>' + esc(studentName(r.studentId)) + '</td><td><span class="badge badge-info">' + esc(r.type) + '</span></td>' +
+      '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.content) + '</td>' +
+      '<td>' + (esc(r.followup) || '-') + '</td>' +
+      '<td>' + (imgs.length ? '<a style="cursor:pointer;color:var(--primary);font-weight:600" onclick="viewTalkImagesByRec(' + r.id + ')">📷 ' + imgs.length + '张</a>' : '-') + '</td>' +
+      '<td><button class="btn btn-default btn-sm" onclick="editTalk(' + r.id + ')">编辑</button> ' +
+      '<button class="btn btn-danger btn-sm" onclick="deleteTalk(' + r.id + ')">删除</button></td></tr>';
+  }).join('');
   return '<h2 class="page-title">谈心谈话</h2>' +
-    '<button class="btn btn-primary mb" onclick="showTalkForm()">+ 添加谈话</button>' +
-    '<div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>日期</th><th>学生</th><th>类型</th><th>内容</th><th>跟进</th><th>操作</th></tr></thead><tbody>' +
-    DATA.talks.sort(function(a, b) { return b.date.localeCompare(a.date); }).map(function(r) {
-      return '<tr><td>' + r.date + '</td><td>' + esc(studentName(r.studentId)) + '</td><td><span class="badge badge-info">' + r.type + '</span></td>' +
-        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.content) + '</td>' +
-        '<td>' + (esc(r.followup) || '-') + '</td><td><button class="btn btn-danger btn-sm" onclick="deleteTalk(' + r.id + ')">删除</button></td></tr>';
-    }).join('') + '</tbody></table></div>';
+    '<div class="flex gap mb" style="flex-wrap:wrap;align-items:center">' +
+    '<button class="btn btn-primary" onclick="showTalkForm()">+ 添加谈话</button>' +
+    '<button class="btn btn-default" onclick="exportTalkDoc()">导出 Word 表格</button>' +
+    '<button class="btn btn-default" onclick="openDocTplEditor(\'talk\')">Word 模板设置</button></div>' +
+    '<p class="muted" style="font-size:12px;margin-bottom:8px">支持把与学生的聊天记录/情况说明截图附在记录上（每单最多 9 张）：在「谈话内容」框里直接 <b>Ctrl+V 粘贴</b>，或点「＋ 选择截图」上传；点「📷 N张」可放大查看。表单内还可一键让 AI <b>提炼要点</b>或把口语内容<b>整理成规范记录</b>。</p>' +
+    '<div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>日期</th><th>学生</th><th>类型</th><th>内容</th><th>跟进</th><th>截图</th><th>操作</th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="7" class="empty">暂无谈话记录，点上方「+ 添加谈话」开始</td></tr>') +
+    '</tbody></table></div>';
 };
 
-function showTalkForm() {
-  openModal('<div class="modal-header"><h3>添加谈话记录</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div>' +
+var _tfImgs = [];
+var _tfEditId = 0;   // >0 表示正在编辑该条谈话记录
+function showTalkForm() { openTalkForm(null); }
+function editTalk(id) {
+  for (var i = 0; i < DATA.talks.length; i++) if (DATA.talks[i].id === id) { openTalkForm(DATA.talks[i]); return; }
+}
+function openTalkForm(rec) {
+  rec = rec || {};
+  _tfEditId = rec.id || 0;
+  if (_tfImgs.length) mdDropRefs(_tfImgs.slice());   // 清掉上一次打开未保存而残留的图片
+  _tfImgs = (rec.images && rec.images.length) ? rec.images.slice() : [];
+  var stOpts = DATA.students.map(function(s) {
+    return '<option value="' + s.id + '"' + (rec.studentId === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>';
+  }).join('') || '<option value="">（暂无学生，请先添加）</option>';
+  var tOpts = ['日常谈心', '成绩分析', '心理辅导', '纪律谈话'].map(function(t) {
+    return '<option' + ((rec.type || '日常谈心') === t ? ' selected' : '') + '>' + t + '</option>';
+  }).join('');
+  openModal('<div class="modal-header"><h3>' + (_tfEditId ? '编辑谈话记录' : '添加谈话记录') + '</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div>' +
     '<div class="modal-body"><div class="form-row">' +
-    '<div class="form-group"><label>学生</label><select id="tf-student">' + DATA.students.map(function(s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') + '</select></div>' +
-    '<div class="form-group"><label>类型</label><select id="tf-type"><option>日常谈心</option><option>成绩分析</option><option>心理辅导</option><option>纪律谈话</option></select></div>' +
-    '<div class="form-group"><label>日期</label><input type="date" id="tf-date" value="' + todayStr() + '"></div></div>' +
-    '<div class="form-group"><label>谈话内容</label><textarea id="tf-content" rows="4"></textarea></div>' +
-    '<div class="flex gap mb" style="align-items:center"><button class="btn btn-danger recording-btn" onclick="toggleRecording(\'tf-content\')">🎤 语音转文字</button><span class="muted">录音识别中文</span></div>' +
-    '<div class="form-group"><label>跟进事项</label><input id="tf-followup"></div><button class="btn btn-primary" onclick="saveTalk()">保存</button></div>');
+    '<div class="form-group"><label>学生</label><select id="tf-student">' + stOpts + '</select></div>' +
+    '<div class="form-group"><label>类型</label><select id="tf-type">' + tOpts + '</select></div>' +
+    '<div class="form-group"><label>日期</label><input type="date" id="tf-date" value="' + (rec.date || todayStr()) + '"></div></div>' +
+    '<div class="form-group"><label>谈话内容（光标放在框内可直接 Ctrl+V 粘贴截图）</label><textarea id="tf-content" rows="5" onpaste="pasteImgInto(event,\'talk\')">' + esc(rec.content || '') + '</textarea></div>' +
+    '<div class="flex gap mb" style="flex-wrap:wrap;align-items:center">' +
+    '<button class="btn btn-default" onclick="aiAssist(\'tf-content\',\'tf-followup\',\'tf-ai-out\',\'points\')">🤖 AI 提炼要点</button>' +
+    '<button class="btn btn-default" onclick="aiAssist(\'tf-content\',\'tf-content\',\'tf-ai-out\',\'polish\')">🤖 AI 整理成文</button>' +
+    '<span class="muted" style="font-size:12px">🎤 想口述？用手机输入法键盘上的麦克风直接说话，比浏览器自带识别更准</span></div>' +
+    '<div id="tf-ai-out"></div>' +
+    '<div class="form-group"><label>跟进事项</label><input id="tf-followup" value="' + esc(rec.followup || '') + '"></div>' +
+    '<div class="form-group"><label>谈话截图（最多 9 张，存入本机图片库）</label>' +
+    '<input type="file" id="tf-imgs" accept="image/*" multiple style="display:none" onchange="addTalkImages(this)">' +
+    '<div class="paste-zone"><button class="btn btn-default btn-sm" onclick="document.getElementById(\'tf-imgs\').click()">＋ 选择截图</button>' +
+    '<span class="md-hint">或把光标放到「谈话内容」框里按 Ctrl+V 直接粘贴</span></div></div>' +
+    '<div id="tf-imgs-preview" class="flex gap wrap" style="margin:6px 0"></div>' +
+    '<button class="btn btn-primary" onclick="saveTalk()">保存</button></div>');
+  renderTalkImagePreview();
+}
+
+function renderTalkImagePreview() {
+  var box = el('tf-imgs-preview');
+  if (!box) return;
+  box.innerHTML = _tfImgs.map(function(ref, i) {
+    return '<div style="position:relative"><img class="md-img" ' + mdImgAttr(ref) + ' style="width:86px;height:86px;object-fit:cover;border-radius:8px;border:1px solid #ddd">' +
+      '<button style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:none;background:#ef4444;color:#fff;font-size:13px;line-height:22px;cursor:pointer" onclick="removeTalkImage(' + i + ')" title="移除">×</button></div>';
+  }).join('');
+  hydrateMedia(box);
+}
+function addTalkImages(input) {
+  addImgFiles('talk', Array.prototype.slice.call(input.files || []));
+  input.value = '';
+}
+function removeTalkImage(idx) {
+  var ref = _tfImgs[idx];
+  _tfImgs.splice(idx, 1);
+  mdDropRefs([ref]);
+  renderTalkImagePreview();
+}
+function viewTalkImagesByRec(id) {
+  var r = null;
+  for (var i = 0; i < DATA.talks.length; i++) if (DATA.talks[i].id === id) { r = DATA.talks[i]; break; }
+  if (!r || !r.images || !r.images.length) return;
+  var h = '<div class="modal-header"><h3>谈话截图 - ' + esc(studentName(r.studentId)) + ' (' + esc(r.date) + ' ' + esc(r.type) + ')</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div>';
+  h += '<div class="modal-body"><p class="md-hint" style="margin:0 0 8px;font-size:12px">共 ' + r.images.length + ' 张。点击任意缩略图，大图会显示在下方。</p>';
+  h += '<div class="md-grid">' + r.images.map(function(ref, i) {
+    return '<div style="text-align:center"><img class="md-img" ' + mdImgAttr(ref) + ' style="max-width:200px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.15);cursor:zoom-in" onclick="mdShowBigIdx(\'talk\',' + id + ',' + i + ',\'md-big\')">' +
+      '<div style="font-size:12px;color:#888">截图' + (i + 1) + '</div></div>';
+  }).join('') + '</div>';
+  h += '<div id="md-big" class="md-big"></div></div>';
+  openModal(h, 'lg');
 }
 
 function saveTalk() {
-  DATA.talks.push({ id: uid(DATA.talks), studentId: parseInt(el('tf-student').value), date: el('tf-date').value, type: el('tf-type').value, content: el('tf-content').value, followup: el('tf-followup').value });
-  save(); closeModalForce(); renderPage(); toast('谈话已保存');
-  if (isRecording) stopRecording();
+  var val = {
+    studentId: parseInt(el('tf-student').value, 10),
+    date: el('tf-date').value,
+    type: el('tf-type').value,
+    content: (el('tf-content').value || '').trim(),
+    followup: (el('tf-followup').value || '').trim(),
+    images: _tfImgs.slice()
+  };
+  if (!val.content) { toast('请填写谈话内容', 'warning'); return; }
+  if (_tfEditId) {
+    for (var i = 0; i < DATA.talks.length; i++) if (DATA.talks[i].id === _tfEditId) {
+      var o = DATA.talks[i];
+      // 先记下被移除的旧图，改完 DATA 再判断是否真删（共享图片不会被误删）
+      var removed = (o.images || []).filter(function(r) { return val.images.indexOf(r) < 0; });
+      o.studentId = val.studentId; o.date = val.date; o.type = val.type;
+      o.content = val.content; o.followup = val.followup; o.images = val.images;
+      mdDropRefs(removed);
+    }
+  } else {
+    val.id = uid(DATA.talks);
+    DATA.talks.push(val);
+  }
+  var isEdit = !!_tfEditId;
+  _tfEditId = 0;
+  _tfImgs = [];
+  save(); closeModalForce(); renderPage(); toast(isEdit ? '谈话记录已更新' : '谈话记录已保存');
 }
 
 function deleteTalk(id) {
   if (!confirm('确定删除？')) return;
+  var refs = [];
+  for (var i = 0; i < DATA.talks.length; i++) if (DATA.talks[i].id === id) { refs = (DATA.talks[i].images || []).slice(); break; }
   DATA.talks = DATA.talks.filter(function(t) { return t.id !== id; });
+  mdDropRefs(refs);   // 无人引用的图片一并从图片库清理
   save(); renderPage();
 }
 
@@ -4020,8 +4124,11 @@ function deleteTalk(id) {
 // ============================================================
 renderers.communication = function() {
   return '<h2 class="page-title">家校沟通</h2>' +
-    '<button class="btn btn-primary mb" onclick="showCommForm()">+ 添加记录</button>' +
-    '<p class="muted" style="font-size:12px;margin-bottom:8px">支持与家长的微信/QQ 等聊天截图（每单最多 9 张）：在「内容」框里直接 <b>Ctrl+V 粘贴</b>，或点「＋ 选择截图」上传；图片自动存入本机图片库，点「📷 N张」可放大查看。</p>' +
+    '<div class="flex gap mb" style="flex-wrap:wrap;align-items:center">' +
+    '<button class="btn btn-primary" onclick="showCommForm()">+ 添加记录</button>' +
+    '<button class="btn btn-default" onclick="exportCommDoc()">导出 Word 表格</button>' +
+    '<button class="btn btn-default" onclick="openDocTplEditor(\'comm\')">Word 模板设置</button></div>' +
+    '<p class="muted" style="font-size:12px;margin-bottom:8px">支持与家长的微信/QQ 等聊天截图（每单最多 9 张）：在「内容」框里直接 <b>Ctrl+V 粘贴</b>，或点「＋ 选择截图」上传；图片自动存入本机图片库，点「📷 N张」可放大查看。表单内还可一键让 AI <b>提炼要点</b>或把口语内容<b>整理成规范记录</b>。</p>' +
     '<div class="card" style="padding:0;overflow:auto"><table><thead><tr><th>日期</th><th>学生</th><th>联系人</th><th>方式</th><th>内容</th><th>结果</th><th>截图</th><th>操作</th></tr></thead><tbody>' +
     DATA.communications.sort(function(a, b) { return b.date.localeCompare(a.date); }).map(function(r) {
       var imgs = (r.images && r.images.length) ? r.images : [];
@@ -4060,7 +4167,11 @@ function openCommForm(rec) {
     '<div class="form-group"><label>日期</label><input type="date" id="cf-date" value="' + (rec.date || todayStr()) + '"></div></div>' +
     '<div class="form-group"><label>联系人</label><input id="cf-contact" value="' + esc(rec.contact || '') + '"></div>' +
     '<div class="form-group"><label>内容（光标放在框内可直接 Ctrl+V 粘贴聊天截图）</label><textarea id="cf-content" rows="3" onpaste="pasteImgInto(event,\'comm\')">' + esc(rec.content || '') + '</textarea></div>' +
-    '<div class="flex gap mb"><button class="btn btn-danger recording-btn" onclick="toggleRecording(\'cf-content\')">🎤 语音转文字</button></div>' +
+    '<div class="flex gap mb" style="flex-wrap:wrap;align-items:center">' +
+    '<button class="btn btn-default" onclick="aiAssist(\'cf-content\',\'cf-result\',\'cf-ai-out\',\'points\')">🤖 AI 提炼要点</button>' +
+    '<button class="btn btn-default" onclick="aiAssist(\'cf-content\',\'cf-content\',\'cf-ai-out\',\'polish\')">🤖 AI 整理成文</button>' +
+    '<span class="muted" style="font-size:12px">🎤 想口述？用手机输入法键盘上的麦克风直接说话，比浏览器自带识别更准</span></div>' +
+    '<div id="cf-ai-out"></div>' +
     '<div class="form-group"><label>聊天截图（最多 9 张，存入本机图片库）</label>' +
     '<input type="file" id="cf-imgs" accept="image/*" multiple style="display:none" onchange="addCommImages(this)">' +
     '<div class="paste-zone"><button class="btn btn-default btn-sm" onclick="document.getElementById(\'cf-imgs\').click()">＋ 选择截图</button>' +
@@ -4148,6 +4259,448 @@ function deleteComm(id) {
   DATA.communications = DATA.communications.filter(function(c) { return c.id !== id; });
   mdDropRefs(refs);   // 无人引用的图片一并从图片库清理
   save(); renderPage();
+}
+
+// ============================================================
+//  记录导出（Word 表格）
+//    零依赖做法：生成 Word 认得的那种 HTML（带 MSO 命名空间），存成 .doc，
+//    Word / WPS 打开就是标准表格，字体、字号、纸张、页边距、列宽全都能控。
+//    模板存在本机浏览器，可导出/导入为 .json 文件；也支持导入现成的 .docx
+//    以反推它的字体、纸张、页边距和表格列名。
+// ============================================================
+var DOC_TPL_KEY = 'banzhuren_doc_tpl';
+
+// 每种记录可用的字段（数组顺序即默认列顺序）
+var DOC_FIELDS = {
+  comm: [
+    { key: 'date', label: '日期', w: 58 },
+    { key: 'student', label: '学生', w: 52 },
+    { key: 'contact', label: '联系人', w: 58 },
+    { key: 'method', label: '方式', w: 42 },
+    { key: 'content', label: '沟通内容', w: 210 },
+    { key: 'result', label: '结果', w: 130 },
+    { key: 'images', label: '截图', w: 52 }
+  ],
+  talk: [
+    { key: 'date', label: '日期', w: 58 },
+    { key: 'student', label: '学生', w: 52 },
+    { key: 'type', label: '类型', w: 56 },
+    { key: 'content', label: '谈话内容', w: 245 },
+    { key: 'followup', label: '跟进事项', w: 150 },
+    { key: 'images', label: '截图', w: 52 }
+  ]
+};
+var DOC_DEFAULT_TPL = {
+  comm: { title: '家校沟通记录表', font: '宋体', size: 10.5, orient: 'portrait', margin: 20,
+          foot: '记录人：____________　　教导处审核：____________', cols: [] },
+  talk: { title: '谈心谈话记录表', font: '宋体', size: 10.5, orient: 'portrait', margin: 20,
+          foot: '记录人：____________　　学生签字：____________', cols: [] }
+};
+// 表头文字 → 字段的匹配词（导入 Word 模板时用）
+var DOC_ALIAS = {
+  comm: {
+    date: ['日期', '时间', '沟通日期'],
+    student: ['学生', '学生姓名', '姓名', '孩子'],
+    contact: ['联系人', '家长', '家长姓名', '联系人姓名', '沟通对象'],
+    method: ['方式', '沟通方式', '途径', '形式'],
+    content: ['内容', '沟通内容', '沟通情况', '交流内容', '情况', '记录'],
+    result: ['结果', '处理结果', '沟通结果', '结论', '反馈', '效果'],
+    images: ['截图', '图片', '附件', '照片']
+  },
+  talk: {
+    date: ['日期', '时间', '谈话日期'],
+    student: ['学生', '学生姓名', '姓名'],
+    type: ['类型', '谈话类型', '类别', '性质'],
+    content: ['内容', '谈话内容', '谈话记录', '情况', '记录'],
+    followup: ['跟进', '跟进事项', '后续', '待办', '下一步', '措施'],
+    images: ['截图', '图片', '附件', '照片']
+  }
+};
+
+function docTplAll() {
+  try { return JSON.parse(localStorage.getItem(DOC_TPL_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function docTplSave(kind, tpl) {
+  var o = docTplAll();
+  o[kind] = tpl;
+  try { localStorage.setItem(DOC_TPL_KEY, JSON.stringify(o)); } catch (e) {}
+}
+// 读模板并把缺项补成默认值（老模板 / 半成品模板也能直接用）
+function docTplGet(kind) {
+  var d = DOC_DEFAULT_TPL[kind], saved = docTplAll()[kind] || {}, out = {}, k;
+  for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) out[k] = (saved[k] !== undefined ? saved[k] : d[k]);
+  out.title = String(out.title || '').trim();
+  out.font = String(out.font || '').trim() || '宋体';
+  out.size = Number(out.size) || 10.5;
+  out.orient = (out.orient === 'landscape') ? 'landscape' : 'portrait';
+  out.margin = Number(out.margin);
+  if (isNaN(out.margin) || out.margin < 5 || out.margin > 50) out.margin = 20;
+  out.foot = String(out.foot == null ? d.foot : out.foot);
+  out.cols = DOC_FIELDS[kind].map(function(f) {
+    var c = null, i, arr = saved.cols || [];
+    for (i = 0; i < arr.length; i++) if (arr[i] && arr[i].key === f.key) { c = arr[i]; break; }
+    return {
+      key: f.key,
+      label: (c && String(c.label || '').trim()) || f.label,
+      w: (c && Number(c.w)) || f.w,
+      on: c ? (c.on !== false) : true
+    };
+  });
+  if (!out.cols.some(function(c) { return c.on; })) out.cols.forEach(function(c) { c.on = true; });
+  return out;
+}
+function dEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+// 生成 Word 能识别的 HTML
+function docBuildHtml(tpl, tableHtml) {
+  var land = (tpl.orient === 'landscape');
+  var pw = land ? 297 : 210, ph = land ? 210 : 297;
+  var fs = Number(tpl.size) || 10.5;
+  var fam = String(tpl.font || '宋体').replace(/["<>]/g, '');
+  var st = '@page WordSection1 { size: ' + pw + 'mm ' + ph + 'mm; margin: ' + tpl.margin + 'mm; }' +
+    'div.WordSection1 { page: WordSection1; }' +
+    'body, p, td, th { font-family: "' + fam + '", SimSun, "宋体", serif; font-size: ' + fs + 'pt; }' +
+    'h1.dt { font-family: "' + fam + '", SimSun, "宋体", serif; font-size: ' + (fs + 6) + 'pt; font-weight: bold; text-align: center; margin: 0 0 8pt 0; letter-spacing: 2pt; }' +
+    'table.tb { border-collapse: collapse; width: 100%; }' +
+    'table.tb th { border: 1pt solid #000000; padding: 3pt 4pt; text-align: center; font-weight: bold; background: #F2F2F2; }' +
+    'table.tb td { border: 1pt solid #000000; padding: 3pt 4pt; vertical-align: top; line-height: 1.45; word-break: break-all; }' +
+    'p.ft { margin-top: 8pt; }';
+  return '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+    '<head><meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
+    '<title>' + dEsc(tpl.title) + '</title>' +
+    '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->' +
+    '<style>' + st + '</style></head><body><div class="WordSection1">' +
+    (tpl.title ? '<h1 class="dt">' + dEsc(tpl.title) + '</h1>' : '') +
+    tableHtml +
+    (tpl.foot ? '<p class="ft">' + dEsc(tpl.foot) + '</p>' : '') +
+    '</div></body></html>';
+}
+// 生成表格：列宽按模板权重换算成 pt（Word 对 pt 支持最稳）
+function docBuildTable(kind, rows, tpl) {
+  var cols = tpl.cols.filter(function(c) { return c.on; });
+  if (!cols.length) cols = tpl.cols.slice();
+  var land = (tpl.orient === 'landscape');
+  var avail = ((land ? 297 : 210) - tpl.margin * 2) * 2.834646;   // 可用宽度 mm → pt
+  var sum = cols.reduce(function(s, c) { return s + (Number(c.w) || 50); }, 0) || 1;
+  var h = '<table class="tb"><colgroup>';
+  cols.forEach(function(c) { h += '<col style="width:' + ((Number(c.w) || 50) / sum * avail).toFixed(1) + 'pt">'; });
+  h += '</colgroup><thead><tr>';
+  cols.forEach(function(c) { h += '<th>' + dEsc(c.label) + '</th>'; });
+  h += '</tr></thead><tbody>';
+  rows.forEach(function(r) {
+    h += '<tr>';
+    cols.forEach(function(c) {
+      var v = r[c.key];
+      h += '<td>' + dEsc(v == null ? '' : String(v)).replace(/\n/g, '<br>') + '</td>';
+    });
+    h += '</tr>';
+  });
+  return h + '</tbody></table>';
+}
+// 把 DATA 拍平成导出用的行
+function docRows(kind) {
+  function byDate(a, b) { return String(a.date).localeCompare(String(b.date)); }
+  if (kind === 'comm') {
+    return DATA.communications.slice().sort(byDate).map(function(r) {
+      return {
+        date: r.date || '', student: studentName(r.studentId), contact: r.contact || '',
+        method: r.method || '', content: r.content || '', result: r.result || '',
+        images: (r.images && r.images.length) ? (r.images.length + ' 张') : ''
+      };
+    });
+  }
+  return DATA.talks.slice().sort(byDate).map(function(r) {
+    return {
+      date: r.date || '', student: studentName(r.studentId), type: r.type || '',
+      content: r.content || '', followup: r.followup || '',
+      images: (r.images && r.images.length) ? (r.images.length + ' 张') : ''
+    };
+  });
+}
+function docDownload(filename, html) {
+  var blob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 2000);
+}
+function docExport(kind) {
+  var rows = docRows(kind);
+  if (!rows.length) { toast('暂无记录可导出', 'warning'); return; }
+  var tpl = docTplGet(kind);
+  var base = String(tpl.title || '记录表').replace(/[\\/:*?"<>|]/g, '_');
+  var fn = base + '_' + todayStr() + '.doc';
+  docDownload(fn, docBuildHtml(tpl, docBuildTable(kind, rows, tpl)));
+  toast('已导出 ' + rows.length + ' 条记录：' + fn);
+}
+function exportCommDoc() { docExport('comm'); }
+function exportTalkDoc() { docExport('talk'); }
+
+// ---- 模板设置面板 ----
+var _dtKind = 'comm';
+function openDocTplEditor(kind) {
+  _dtKind = (kind === 'talk') ? 'talk' : 'comm';
+  var tpl = docTplGet(_dtKind);
+  var name = (_dtKind === 'comm') ? '家校沟通' : '谈心谈话';
+  var h = '<div class="modal-header"><h3>' + name + ' · Word 导出模板</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div><div class="modal-body">';
+  h += '<p class="muted" style="font-size:12px;margin-bottom:8px;line-height:1.7">这里的设置决定导出的 Word 表格长什么样，保存后每次「导出 Word 表格」都按它生成。' +
+       '也可以点「导入 Word 模板」，从一份现成的 <b>.docx</b> 里自动读取字体、字号、纸张、页边距和表格列名。</p>';
+  h += '<div class="form-row">' +
+       '<div class="form-group"><label>表格标题</label><input id="dt-title" value="' + esc(tpl.title) + '"></div>' +
+       '<div class="form-group"><label>字体</label><input id="dt-font" value="' + esc(tpl.font) + '" placeholder="宋体 / 黑体 / 楷体"></div>' +
+       '<div class="form-group"><label>字号(pt)</label><input type="number" step="0.5" min="6" max="22" id="dt-size" value="' + tpl.size + '"></div></div>';
+  h += '<div class="form-row">' +
+       '<div class="form-group"><label>纸张方向</label><select id="dt-orient">' +
+       '<option value="portrait"' + (tpl.orient !== 'landscape' ? ' selected' : '') + '>纵向 A4</option>' +
+       '<option value="landscape"' + (tpl.orient === 'landscape' ? ' selected' : '') + '>横向 A4（列多时推荐）</option>' +
+       '</select></div>' +
+       '<div class="form-group"><label>页边距(mm，四边相同)</label><input type="number" min="5" max="50" id="dt-margin" value="' + tpl.margin + '"></div>' +
+       '<div class="form-group"><label>页脚文字（可留空）</label><input id="dt-foot" value="' + esc(tpl.foot) + '"></div></div>';
+  h += '<label style="font-size:13px;font-weight:600;display:block;margin:6px 0 4px">显示哪些列 / 列名 / 宽度</label>';
+  h += '<div class="card" style="padding:0;overflow:auto"><table><thead><tr><th style="width:64px">显示</th><th>列名</th><th style="width:110px">宽度</th></tr></thead><tbody>';
+  tpl.cols.forEach(function(c) {
+    h += '<tr><td style="text-align:center"><input type="checkbox" id="dt-c-' + c.key + '"' + (c.on ? ' checked' : '') + '></td>' +
+      '<td><input id="dt-l-' + c.key + '" value="' + esc(c.label) + '"></td>' +
+      '<td><input type="number" min="20" max="500" id="dt-w-' + c.key + '" value="' + c.w + '"></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  h += '<p class="muted" style="font-size:12px;margin:8px 0">「宽度」是相对权重，只决定各列谁宽谁窄，数值越大越宽。</p>';
+  h += '<input type="file" id="dt-import" accept=".docx,.doc,.htm,.html" style="display:none" onchange="importDocTplFile(this)">';
+  h += '<div class="flex gap" style="flex-wrap:wrap">' +
+       '<button class="btn btn-primary" onclick="saveDocTplForm()">保存模板</button>' +
+       '<button class="btn btn-default" onclick="document.getElementById(\'dt-import\').click()">导入 Word 模板</button>' +
+       '<button class="btn btn-default" onclick="resetDocTpl()">恢复默认</button>' +
+       '<button class="btn btn-default" onclick="docExport(\'' + _dtKind + '\')">先导出看看</button></div>';
+  h += '</div>';
+  openModal(h, 'lg');
+}
+function saveDocTplForm() {
+  var kind = _dtKind, base = docTplGet(kind);
+  var tpl = {};
+  tpl.title = (el('dt-title').value || '').trim();
+  tpl.font = (el('dt-font').value || '').trim() || '宋体';
+  tpl.size = Number(el('dt-size').value) || 10.5;
+  tpl.orient = (el('dt-orient').value === 'landscape') ? 'landscape' : 'portrait';
+  var mg = Number(el('dt-margin').value);
+  tpl.margin = (isNaN(mg) || mg < 5 || mg > 50) ? 20 : mg;
+  tpl.foot = (el('dt-foot').value || '').trim();
+  tpl.cols = DOC_FIELDS[kind].map(function(f) {
+    var cb = el('dt-c-' + f.key), lb = el('dt-l-' + f.key), wv = el('dt-w-' + f.key);
+    return {
+      key: f.key,
+      label: ((lb && lb.value) || '').trim() || f.label,
+      w: Number(wv && wv.value) || f.w,
+      on: !!(cb && cb.checked)
+    };
+  });
+  if (!tpl.cols.some(function(c) { return c.on; })) { toast('至少要保留一列', 'warning'); return; }
+  if (!tpl.title) tpl.title = base.title;
+  docTplSave(kind, tpl);
+  closeModalForce(); renderPage();
+  toast('模板已保存，下次导出就用这套格式');
+}
+function resetDocTpl() {
+  var kind = _dtKind;
+  try {
+    var o = docTplAll();
+    delete o[kind];
+    localStorage.setItem(DOC_TPL_KEY, JSON.stringify(o));
+  } catch (e) {}
+  closeModalForce();
+  openDocTplEditor(kind);
+  toast('已恢复默认格式');
+}
+
+// ---- 导入模板文件 ----
+function importDocTplFile(input) {
+  var f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  var kind = _dtKind, nm = String(f.name || '').toLowerCase();
+  var rd = new FileReader();
+  rd.onload = function() { docImportBuffer(kind, rd.result, nm); };
+  rd.onerror = function() { toast('文件读取失败', 'error'); };
+  rd.readAsArrayBuffer(f);
+  toast('正在读取模板…');
+}
+function docImportBuffer(kind, buf, nm) {
+  if (/\.docx$/.test(nm)) {
+    docxDocXml(buf).then(function(xml) {
+      if (!xml) {
+        toast('读不出这个 .docx：可能是二进制 .doc 改了扩展名，或文件已加密', 'error');
+        return;
+      }
+      docApplyParsed(kind, docxToTpl(xml));
+    }).catch(function() { toast('解析 .docx 失败', 'error'); });
+    return;
+  }
+  // .doc / .htm：Word「另存为网页」出来的就是纯 HTML，可直接解析
+  var txt = '';
+  try { txt = new TextDecoder('utf-8').decode(new Uint8Array(buf)); } catch (e) { txt = ''; }
+  if (!txt || txt.indexOf('<') < 0) {
+    toast('读不出这个 .doc：二进制格式解析不了。请在 Word 里「另存为 → 网页(.htm)」后再导入，或直接用 .docx', 'error');
+    return;
+  }
+  docApplyParsed(kind, docHtmlToTpl(txt));
+}
+function docMatchHead(kind, head) {
+  var map = DOC_ALIAS[kind] || {}, h = String(head || '').replace(/\s/g, '');
+  if (!h) return '';
+  var k, i;
+  for (k in map) {
+    if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+    for (i = 0; i < map[k].length; i++) {
+      if (h === map[k][i] || h.indexOf(map[k][i]) >= 0) return k;
+    }
+  }
+  return '';
+}
+// 把解析结果套到模板上（列名对得上就自动映射，对不上的保持原样）
+function docApplyParsed(kind, p) {
+  if (!p) { toast('模板解析失败：没读到表格或样式', 'error'); return; }
+  var tpl = docTplGet(kind), hit = 0, total = 0;
+  if (p.font) tpl.font = p.font;
+  if (p.size) tpl.size = p.size;
+  if (p.orient) tpl.orient = p.orient;
+  if (p.margin) tpl.margin = p.margin;
+  if (p.heads && p.heads.length) {
+    total = p.heads.length;
+    var mapped = {}, i;
+    for (i = 0; i < p.heads.length; i++) {
+      var fk = docMatchHead(kind, p.heads[i]);
+      if (fk && !mapped[fk]) { mapped[fk] = { label: p.heads[i], w: (p.widths && p.widths[i]) || 0 }; hit++; }
+    }
+    var anyOn = false;
+    tpl.cols = DOC_FIELDS[kind].map(function(f) {
+      var m = mapped[f.key];
+      if (m) anyOn = true;
+      return { key: f.key, label: m ? m.label : f.label, w: (m && m.w > 0) ? m.w : f.w, on: !!m };
+    });
+    if (!anyOn) tpl.cols.forEach(function(c) { c.on = true; });   // 一个都没匹配上就保持全开
+  }
+  docTplSave(kind, tpl);
+  closeModalForce(); renderPage();
+  toast('已按 Word 模板更新：读到 ' + total + ' 列，匹配上 ' + hit + ' 列' + (hit ? '' : '（列名没对上，仍保留原有列）') + '；可再打开模板设置微调');
+}
+
+// ---- 读取 .docx（本质是 zip 包）里的 XML ----
+function zipEntries(buf) {
+  var u8 = new Uint8Array(buf), dv = new DataView(buf), n = u8.length, i, eocd = -1;
+  var min = Math.max(0, n - 22 - 65535);
+  for (i = n - 22; i >= min; i--) {
+    if (u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 0x05 && u8[i + 3] === 0x06) { eocd = i; break; }
+  }
+  if (eocd < 0 || eocd + 22 > n) return [];
+  var count = dv.getUint16(eocd + 10, true), off = dv.getUint32(eocd + 16, true), p = off, out = [];
+  for (i = 0; i < count; i++) {
+    if (p + 46 > n || dv.getUint32(p, true) !== 0x02014b50) break;
+    var nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+    out.push({
+      name: new TextDecoder('utf-8').decode(u8.subarray(p + 46, p + 46 + nlen)),
+      method: dv.getUint16(p + 10, true),
+      csize: dv.getUint32(p + 20, true),
+      lho: dv.getUint32(p + 42, true)
+    });
+    p += 46 + nlen + elen + clen;
+  }
+  return out;
+}
+function zipEntryRaw(buf, e) {
+  var u8 = new Uint8Array(buf), dv = new DataView(buf), p = e.lho;
+  if (p + 30 > u8.length || dv.getUint32(p, true) !== 0x04034b50) return null;
+  var nlen = dv.getUint16(p + 26, true), elen = dv.getUint16(p + 28, true);
+  var s = p + 30 + nlen + elen;
+  return u8.subarray(s, s + e.csize);
+}
+function inflateRawBytes(data) {
+  if (typeof DecompressionStream === 'undefined') return Promise.resolve(null);
+  try {
+    var st = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Response(st).arrayBuffer().then(
+      function(ab) { return new Uint8Array(ab); },
+      function() { return null; }
+    );
+  } catch (e) { return Promise.resolve(null); }
+}
+function docxDocXml(buf) {
+  var list = zipEntries(buf), e = null, i;
+  for (i = 0; i < list.length; i++) if (list[i].name === 'word/document.xml') { e = list[i]; break; }
+  if (!e) return Promise.resolve(null);
+  var raw = zipEntryRaw(buf, e);
+  if (!raw) return Promise.resolve(null);
+  if (e.method === 0) return Promise.resolve(new TextDecoder('utf-8').decode(raw));
+  return inflateRawBytes(raw).then(function(d) {
+    return d ? new TextDecoder('utf-8').decode(d) : null;
+  });
+}
+function docxCellText(tc) {
+  var ts = tc.getElementsByTagName('w:t'), s = '', i;
+  for (i = 0; i < ts.length; i++) s += ts[i].textContent || '';
+  return s.replace(/\s+/g, ' ').trim();
+}
+// 从 document.xml 里取字体 / 字号 / 纸张 / 页边距 / 表格列宽与表头
+function docxToTpl(xml) {
+  var doc;
+  try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return null; }
+  if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+  var TW = 56.6929;   // 1mm = 56.6929 twips
+  var out = { heads: [], widths: [] };
+  var pgSz = doc.getElementsByTagName('w:pgSz')[0];
+  if (pgSz) {
+    var wv = Number(pgSz.getAttribute('w:w') || 0), hv = Number(pgSz.getAttribute('w:h') || 0);
+    if (wv && hv) out.orient = (wv > hv) ? 'landscape' : 'portrait';
+  }
+  var pgMar = doc.getElementsByTagName('w:pgMar')[0];
+  if (pgMar) {
+    var mt = Number(pgMar.getAttribute('w:top') || 0);
+    if (mt > 0) out.margin = Math.min(50, Math.max(5, Math.round(mt / TW)));
+  }
+  var rf = doc.getElementsByTagName('w:rFonts')[0];
+  if (rf) {
+    var ff = rf.getAttribute('w:eastAsia') || rf.getAttribute('w:ascii') || '';
+    if (ff) out.font = ff;
+  }
+  var sz = doc.getElementsByTagName('w:sz')[0];
+  if (sz) {
+    var sv = Number(sz.getAttribute('w:val') || 0);
+    if (sv > 0) out.size = Math.round(sv / 2 * 10) / 10;   // w:sz 是半磅
+  }
+  var tbl = doc.getElementsByTagName('w:tbl')[0];
+  if (tbl) {
+    var g = tbl.getElementsByTagName('w:gridCol'), i;
+    for (i = 0; i < g.length; i++) out.widths.push(Number(g[i].getAttribute('w:w') || 0));
+    var tr = tbl.getElementsByTagName('w:tr')[0];
+    if (tr) {
+      var tcs = tr.getElementsByTagName('w:tc');
+      for (i = 0; i < tcs.length; i++) out.heads.push(docxCellText(tcs[i]));
+    }
+  }
+  return out;
+}
+// 从 Word「另存为网页」出来的 HTML 里取样式
+function docHtmlToTpl(txt) {
+  var doc;
+  try { doc = new DOMParser().parseFromString(txt, 'text/html'); } catch (e) { return null; }
+  if (!doc) return null;
+  var out = { heads: [], widths: [] }, m;
+  var tbl = doc.querySelector('table');
+  if (tbl) {
+    var tr = tbl.querySelector('tr');
+    if (tr) for (var i = 0; i < tr.children.length; i++) out.heads.push(String(tr.children[i].textContent || '').replace(/\s+/g, ' ').trim());
+    var cs = tbl.querySelectorAll('colgroup col');
+    for (var j = 0; j < cs.length; j++) {
+      var cw = parseInt(cs[j].getAttribute('width') || cs[j].style.width || '', 10);
+      out.widths.push(isNaN(cw) ? 0 : cw);
+    }
+  }
+  if ((m = /font-family\s*:\s*([^;"'}]+)/i.exec(txt))) out.font = m[1].trim().replace(/^['"]|['"]$/g, '').split(',')[0].trim();
+  if ((m = /font-size\s*:\s*([\d.]+)pt/i.exec(txt))) out.size = Number(m[1]);
+  if ((m = /size\s*:\s*([\d.]+)mm\s+([\d.]+)mm/i.exec(txt)) && Number(m[1]) > Number(m[2])) out.orient = 'landscape';
+  if ((m = /margin\s*:\s*([\d.]+)mm/i.exec(txt)) && Number(m[1]) > 0) out.margin = Math.min(50, Math.max(5, Math.round(Number(m[1]))));
+  return out;
 }
 
 // ============================================================
@@ -5816,7 +6369,8 @@ renderers.settings = function() {
     '<div id="snap-panel"></div></div>' +
     '<div class="card"><div class="card-title">☁️ 云同步（多设备）</div>' +
     '<p class="muted" style="font-size:12px;margin-bottom:8px;line-height:1.7">当前通道：<b>' + wbSyncModeText() + '</b>。<br>' +
-    '浏览器本地存储是按「设备 + 网址」隔离的，换台电脑打开自然是空的。要让手机和电脑看到同一份数据，需要一个云端中转：' +
+    '<b>同步时机</b>（为节省云端读写次数、避免浪费额度）：① 本机数据一改动就自动上传；② 从云端取回数据只在「打开页面」和点「立即同步」时进行，<b>不做后台定时轮询</b>。<br>' +
+    '浏览器本地存储按「设备 + 网址」隔离，换台电脑打开自然是空的，所以要有一个云端中转：' +
     '自建后台是一个单文件 Cloudflare 后端（Pages / Worker + KV，个人用量在免费额度内），把它的地址和口令填在下面即可。' +
     '<b>地址不要用 workers.dev</b>（该域名在国内被 DNS 污染，一定连不上），推荐 https://你的项目名.pages.dev ——' +
     '从该网址打开本页时，地址会自动填好，你只需填口令。' +
@@ -5825,12 +6379,16 @@ renderers.settings = function() {
     '<div class="form-group"><label>同步服务地址</label><input id="wbc-url" placeholder="https://你的项目名.pages.dev" value="' + esc(wbSelfCfg().url) + '"></div>' +
     '<div class="form-group"><label>同步口令</label><input type="password" id="wbc-key" autocomplete="off" placeholder="与后端 WB_KEY 保持一致" value="' + esc(wbSelfCfg().key) + '"></div></div>' +
     '<div class="flex gap" style="flex-wrap:wrap;align-items:center">' +
-    '<button class="btn btn-primary" onclick="saveWbCloud()">保存并连接</button>' +
+    (wbSelfCfg().off
+      ? '<button class="btn btn-primary" onclick="reconnectWbCloud()">重新连接</button>'
+      : '<button class="btn btn-primary" onclick="saveWbCloud()">保存并连接</button>') +
     '<button class="btn btn-default" onclick="testWbCloud()">测试连接</button>' +
     '<button class="btn btn-default" onclick="syncWbCloudNow()">立即同步</button>' +
+    (wbSelfCfg().off ? '' : '<button class="btn btn-warning" onclick="disconnectWbCloud()">断开连接</button>') +
     '<button class="btn btn-danger" onclick="wipeWbCloud()">清空云端</button>' +
     '<span id="wbc-result" class="muted" style="font-size:12px;align-self:center"></span></div>' +
-    '<p class="muted" style="font-size:12px;margin-top:8px;line-height:1.7">最近一次同步：' + esc(wbCloud.lastSync || '尚未同步') + '</p></div>' +
+    '<p class="muted" style="font-size:12px;margin-top:8px;line-height:1.7">最近一次同步：' + esc(wbCloud.lastSync || '尚未同步') +
+    (wbSelfCfg().off ? '　·　状态：<b>已断开</b>，本机改动不会上传，点「重新连接」即可恢复' : '') + '</p></div>' +
     '<div class="card"><div class="card-title">数据管理</div><div class="flex gap">' +
     '<button class="btn btn-primary" onclick="exportData()">导出数据(JSON)</button>' +
     '<button class="btn btn-default" onclick="document.getElementById(\'import-file\').click()">导入数据(JSON)</button>' +
@@ -5845,6 +6403,7 @@ function wbSyncModeText() {
     return wbTransport.kind === 'sp' ? 'WorkBuddy 在线数据表 · 已连接' : '自建后端 · 已连接';
   }
   var cfg = wbSelfCfg();
+  if (cfg.off) return '已主动断开（离线使用，数据只存本机）';
   if (cfg.url && cfg.key) return '已填配置但未连接（请点「测试连接」排查）';
   return '单机模式，数据只存本机浏览器';
 }
@@ -5933,6 +6492,23 @@ function wipeWbCloud() {
     renderPage();
   });
 }
+// 主动断开云端：停止一切同步请求，回到纯离线状态（地址与口令保留，随时可一键重连）
+function disconnectWbCloud() {
+  if (!confirm('断开与云端的连接吗？\n\n· 本机数据不受影响，继续正常使用\n· 云端数据不会被删除\n· 断开期间本机的新改动不会上传\n\n重新连接后，本机的改动会自动同步上去。')) return;
+  wbSelfSetOff(true);
+  wbCloudReinit();
+  toast('已断开云端，当前为离线状态');
+  renderPage();
+}
+// 重新连接：沿用已保存的地址与口令，不需要重填
+function reconnectWbCloud() {
+  var c = wbSelfCfg();
+  if (!c.url || !c.key) { toast('地址或口令为空，请填写后点「保存并连接」', 'error'); return; }
+  wbSelfSetOff(false);
+  wbCloudReinit();
+  toast('正在重新连接云端…');
+  renderPage();
+}
 
 function saveSettings() {
   DATA.settings.className = el('set-class').value || '初三(1)班';
@@ -6002,6 +6578,7 @@ function exportData() {
   chain.then(function() {
     var copy = JSON.parse(JSON.stringify(DATA));
     (copy.communications || []).forEach(function(c) { c.images = (c.images || []).map(function(v) { return map[v] || v; }); });
+    (copy.talks || []).forEach(function(tk) { tk.images = (tk.images || []).map(function(v) { return map[v] || v; }); });
     (copy.todos || []).forEach(function(t) {
       (t.attach || []).forEach(function(a) { if (a && a.id && map[a.id]) { a.data = map[a.id]; delete a.id; } });
     });
@@ -7438,6 +8015,68 @@ function aiChat(messages, opts) {
   });
 }
 
+// ---- AI 辅助写作（谈话 / 沟通记录：提炼要点、把口语整理成规范记录）----
+// srcId：来源文本框；targetId：点「采用」时写入的字段；outId：AI 结果展示区；mode：'points' | 'polish'
+function aiAssist(srcId, targetId, outId, mode) {
+  var src = el(srcId), out = el(outId);
+  if (!out) return;
+  var text = src ? String(src.value || '').trim() : '';
+  var what = (mode === 'points') ? '提炼要点' : '整理成文';
+  if (!text) { toast('请先填写要处理的文字内容', 'warning'); return; }
+  if (!aiEnabled()) {
+    out.innerHTML = '<div class="ai-box ai-warn">还没配置 AI 服务。请到「设置 → 🤖 AI 服务配置」填好服务地址、模型名与 API Key，再回来使用这个功能。</div>';
+    return;
+  }
+  out.innerHTML = '<div class="ai-box">🤖 AI 正在' + what + '…</div>';
+  var sys = (mode === 'points')
+    ? '你是一位经验丰富的初中班主任。请把下面这段谈话或家校沟通记录里的关键信息提炼成要点。要求：1) 3-6 条，每条一行，以「· 」开头；2) 只保留事实、态度与结论，去掉口语、寒暄和重复；3) 若涉及后续要做的事，用「待跟进：」单独引出；4) 绝不编造原文没有的信息；5) 直接输出要点，不要任何前言、标题或结语。'
+    : '你是一位经验丰富的初中班主任，正在整理工作记录。请把下面这段口语化、可能零散的记录改写为规范的工作记录。要求：1) 用第三人称客观陈述，200 字以内；2) 内容依次涵盖背景或问题、沟通要点、达成的共识或处理意见；3) 不编造原文没有的信息，不确定的不要添加；4) 直接输出正文，不要标题，不要任何前言或结语。';
+  aiChat([{ role: 'system', content: sys }, { role: 'user', content: text }], { maxTokens: 900, temperature: 0.3 })
+    .then(function(res) {
+      var t = String(res.content || '').trim();
+      if (!t) { out.innerHTML = '<div class="ai-box ai-warn">AI 返回内容为空，请再试一次。</div>'; return; }
+      out.dataset.aiText = t;
+      out.innerHTML = '<div class="ai-box"><div class="ai-box-hd">🤖 AI ' + (mode === 'points' ? '提炼的要点' : '整理后的记录') + '</div>' +
+        '<div class="ai-box-bd">' + esc(t).replace(/\n/g, '<br>') + '</div>' +
+        '<div class="flex gap mt" style="flex-wrap:wrap">' +
+        '<button class="btn btn-primary btn-sm" onclick="aiApply(\'' + targetId + '\',\'' + outId + '\')">采用</button>' +
+        '<button class="btn btn-default btn-sm" onclick="aiAssist(\'' + srcId + '\',\'' + targetId + '\',\'' + outId + '\',\'' + mode + '\')">重新生成</button>' +
+        '<button class="btn btn-default btn-sm" onclick="aiCopy(\'' + outId + '\')">复制</button>' +
+        '<button class="btn btn-default btn-sm" onclick="aiClose(\'' + outId + '\')">放弃</button></div></div>';
+    })
+    .catch(function(e) {
+      var m = (e && e.message) ? e.message : '未知错误';
+      out.innerHTML = '<div class="ai-box ai-warn">❌ AI 调用失败：' + esc(m) +
+        '<br><span class="muted">请检查「设置 → 🤖 AI 服务配置」里的地址、模型名与 Key。浏览器直连大模型官方接口会被跨域拦截，此时请改用自建 OpenAI 兼容代理地址。</span></div>';
+    });
+}
+function aiApply(targetId, outId) {
+  var t = el(targetId), o = el(outId);
+  var txt = (o && o.dataset) ? String(o.dataset.aiText || '') : '';
+  if (!t || !txt) return;
+  if (String(t.value || '').trim() && !confirm('该字段已有内容，用 AI 结果覆盖吗？')) return;
+  t.value = txt;
+  aiClose(outId);
+  toast('已填入');
+}
+function aiCopy(outId) {
+  var o = el(outId);
+  var txt = (o && o.dataset) ? String(o.dataset.aiText || '') : '';
+  if (!txt) return;
+  try {
+    navigator.clipboard.writeText(txt).then(
+      function() { toast('已复制到剪贴板'); },
+      function() { toast('复制失败，请手动选中文字复制', 'error'); }
+    );
+  } catch (e) { toast('复制失败，请手动选中文字复制', 'error'); }
+}
+function aiClose(outId) {
+  var o = el(outId);
+  if (!o) return;
+  o.innerHTML = '';
+  try { delete o.dataset.aiText; } catch (e) {}
+}
+
 // ============================================================
 //  班主任锦囊（管理难题QA + 家长消息回复模板）
 // ============================================================
@@ -7756,6 +8395,10 @@ function mdRefCount(ref) {
     var ims = DATA.communications[i].images || [];
     for (j = 0; j < ims.length; j++) if (ims[j] === ref) n++;
   }
+  for (i = 0; i < DATA.talks.length; i++) {
+    var tims = DATA.talks[i].images || [];
+    for (j = 0; j < tims.length; j++) if (tims[j] === ref) n++;
+  }
   for (i = 0; i < DATA.todos.length; i++) {
     var at = DATA.todos[i].attach || [];
     for (j = 0; j < at.length; j++) if (at[j] && attRef(at[j]) === ref) n++;
@@ -7817,7 +8460,7 @@ function clipImageFiles(e) {
   }
   return out;
 }
-// 统一粘贴入口：kind = 'comm'（家校沟通）| 'todo'（待办）
+// 统一粘贴入口：kind = 'comm'（家校沟通）| 'talk'（谈心谈话）| 'todo'（待办）
 function pasteImgInto(e, kind) {
   var files = clipImageFiles(e);
   if (!files.length) return;   // 纯文字粘贴不拦截
@@ -7837,8 +8480,13 @@ function pasteImgInto(e, kind) {
   addImgFiles(kind, files);
 }
 function addImgFiles(kind, files) {
-  var max = kind === 'comm' ? MEDIA_MAX_IMG : MEDIA_MAX_ATT;
-  function cur() { return kind === 'comm' ? _cfImgs : _tdAttach; }
+  var isList = (kind === 'comm' || kind === 'talk');   // 这两种都是「图片 id 数组」，待办存的是附件对象
+  var max = isList ? MEDIA_MAX_IMG : MEDIA_MAX_ATT;
+  function cur() {
+    if (kind === 'comm') return _cfImgs;
+    if (kind === 'talk') return _tfImgs;
+    return _tdAttach;
+  }
   if (cur().length >= max) { toast('最多 ' + max + ' 张图片', 'warning'); return; }
   var n = 0;
   (files || []).forEach(function(f) {
@@ -7847,6 +8495,7 @@ function addImgFiles(kind, files) {
       if (!id) { if (err) toast(err, 'error'); return; }
       if (cur().length >= max) { mdDropRefs([id]); return; }
       if (kind === 'comm') { _cfImgs.push(id); renderCommImagePreview(); }
+      else if (kind === 'talk') { _tfImgs.push(id); renderTalkImagePreview(); }
       else { _tdAttach.push(imgAttachOf(id, f)); renderTdAttach(); }
       n++;
       toast(n === 1 ? '已粘贴 1 张图片' : '已粘贴 ' + n + ' 张图片');
@@ -7863,6 +8512,8 @@ function mdShowBigIdx(kind, recId, idx, holderId) {
   var ref = '';
   if (kind === 'comm') {
     for (var i = 0; i < DATA.communications.length; i++) if (DATA.communications[i].id === recId) { ref = (DATA.communications[i].images || [])[idx] || ''; break; }
+  } else if (kind === 'talk') {
+    for (var k = 0; k < DATA.talks.length; k++) if (DATA.talks[k].id === recId) { ref = (DATA.talks[k].images || [])[idx] || ''; break; }
   } else {
     for (var j = 0; j < DATA.todos.length; j++) if (DATA.todos[j].id === recId) { var a = (DATA.todos[j].attach || [])[idx]; ref = a ? attRef(a) : ''; break; }
   }
@@ -7879,6 +8530,7 @@ function collectImgRefs(d) {
   var set = {}, out = [];
   function add(v) { if (v && !mdIsDataUrl(v) && !set[v]) { set[v] = 1; out.push(v); } }
   ((d && d.communications) || []).forEach(function(c) { (c.images || []).forEach(add); });
+  ((d && d.talks) || []).forEach(function(tk) { (tk.images || []).forEach(add); });
   ((d && d.todos) || []).forEach(function(t) { (t.attach || []).forEach(function(a) { if (a) add(attRef(a)); }); });
   return out;
 }
@@ -7887,6 +8539,9 @@ function migrateMediaToIdb() {
   var jobs = [];
   (DATA.communications || []).forEach(function(c) {
     (c.images || []).forEach(function(v, i) { if (mdIsDataUrl(v)) jobs.push({ src: v, set: function(nv) { c.images[i] = nv; } }); });
+  });
+  (DATA.talks || []).forEach(function(tk) {
+    (tk.images || []).forEach(function(v, i) { if (mdIsDataUrl(v)) jobs.push({ src: v, set: function(nv) { tk.images[i] = nv; } }); });
   });
   (DATA.todos || []).forEach(function(t) {
     (t.attach || []).forEach(function(a) { if (a && mdIsDataUrl(a.data) && attIsImg(a)) jobs.push({ src: a.data, set: function(nv) { a.data = ''; a.id = nv; } }); });
@@ -8304,7 +8959,11 @@ var WB_KEY_FIELD = '分片键', WB_BODY_FIELD = '内容', WB_TS_FIELD = '更新�
 //   统一接口：pullAll(known) / upsert(items) / wipeAll() / uploadImage(b64,ct) / subscribe(cb)
 // ============================================================
 var WB_SELF_KEY = 'banzhuren_cloud_self';
-var WB_SELF_POLL_MS = 30000;
+// ---- 同步触发策略（为节省 KV 操作数，不做任何后台轮询）----
+//   上传：本机数据有改动时自动推（1.5s 节流）；没改动不发请求
+//   下载：仅「打开页面」与「手动点『立即同步』」两种时机
+//   断开：主动断连后一切请求都不再发出（地址口令保留，可一键重连）
+var WB_SELF_POLL_MS = 0;   // 已废弃：保留常量名以兼容旧引用，0 = 不做定时轮询
 
 // 网页本身就是从 Pages 部署打开的 → 同一域名下就有同步接口，地址可以自动填好
 function wbSelfAutoUrl() {
@@ -8319,17 +8978,24 @@ function wbSelfCfg() {
     var u = String(o.url || '').trim().replace(/\/+$/, '');
     return {
       url: u || wbSelfAutoUrl(),
-      key: String(o.key || '')
+      key: String(o.key || ''),
+      off: !!o.off               // true = 用户主动断开，配置保留但不启用
     };
-  } catch (e) { return { url: wbSelfAutoUrl(), key: '' }; }
+  } catch (e) { return { url: wbSelfAutoUrl(), key: '', off: false }; }
 }
-function wbSelfSave(url, key) {
+function wbSelfSave(url, key, off) {
   try {
     localStorage.setItem(WB_SELF_KEY, JSON.stringify({
       url: String(url || '').trim().replace(/\/+$/, ''),
-      key: String(key || '')
+      key: String(key || ''),
+      off: !!off
     }));
   } catch (e) {}
+}
+// 主动断开／恢复：只改「停用」标记，地址与口令原样留着，随时可一键重连
+function wbSelfSetOff(off) {
+  var c = wbSelfCfg();
+  wbSelfSave(c.url, c.key, off);
 }
 function wbSelfClear() { try { localStorage.removeItem(WB_SELF_KEY); } catch (e) {} }
 
@@ -8457,12 +9123,9 @@ function wbTransSelf(cfg) {
       return j.url;
     });
   };
-  // 自建后端没有推送通道，改用定时轮询；只在页面可见时拉，切回页面立刻拉一次
-  t.subscribe = function(cb) {
-    if (t.poll) clearInterval(t.poll);
-    t.poll = setInterval(function() { if (!document.hidden) cb(); }, WB_SELF_POLL_MS);
-    document.addEventListener('visibilitychange', function() { if (!document.hidden) cb(); });
-  };
+  // 自建后端没有推送通道。为节约 KV 操作数，这里刻意不注册任何定时器，
+  // 也不在切回页面时自动拉取 —— 拉取只发生在「打开页面」与「手动点『立即同步』」。
+  t.subscribe = function() { /* 有意留空：不做后台轮询 */ };
 
   return t;
 }
@@ -8471,6 +9134,7 @@ function wbTransSelf(cfg) {
 function wbTransPick() {
   if (wbCloudEnabled()) return wbTransSP();
   var cfg = wbSelfCfg();
+  if (cfg.off) return { kind: 'off', ready: false, reason: 'disconnected' };
   if (cfg.url && cfg.key) {
     try { return wbTransSelf(cfg); } catch (e) {}
   }
@@ -8518,7 +9182,17 @@ function wbCloudPaint(state, extra) {
   wbCloud.state = state;
   var chip = el('wb-cloud-chip');
   if (!chip) return;
-  var label = ({ off: '单机模式', idle: '云端已连接', syncing: '同步中…', ok: '云端已同步', err: '云端同步失败', empty: '云端暂无数据' })[state] || '单机模式';
+  var label = ({
+    off: '单机模式',
+    disconnected: '已断开·离线',
+    idle: '云端已连接',
+    syncing: '同步中…',
+    ok: '云端已同步',
+    err: '云端同步失败',
+    empty: '云端暂无数据'
+  })[state] || '单机模式';
+  // 已连接但不处于同步动作中时，把「上次同步时间」摆出来，让人一眼知道数据是否新鲜
+  if (!extra && state === 'idle' && wbCloud.lastSync) extra = '上次 ' + wbCloud.lastSync;
   chip.textContent = extra ? label + ' · ' + extra : label;
   chip.className = 'wb-cloud-chip wb-cloud-' + state;
   chip.title = extra ? label + '（' + extra + '）' : label;
@@ -8791,6 +9465,11 @@ function wbCloudBackfillImages() {
       if (v && !mdIsDirect(v)) jobs.push({ get: function() { return v; }, set: function(nv) { c.images[i] = nv; } });
     });
   });
+  (DATA.talks || []).forEach(function(tk) {
+    (tk.images || []).forEach(function(v, i) {
+      if (v && !mdIsDirect(v)) jobs.push({ get: function() { return v; }, set: function(nv) { tk.images[i] = nv; } });
+    });
+  });
   (DATA.todos || []).forEach(function(t) {
     (t.attach || []).forEach(function(a) {
       if (a && attIsImg(a) && a.id && !mdIsDirect(a.id)) jobs.push({ get: function() { return a.id; }, set: function(nv) { a.id = ''; a.data = nv; } });
@@ -8821,7 +9500,12 @@ function wbCloudBackfillImages() {
 }
 function wbCloudInit() {
   wbTransport = wbTransPick();
-  if (!wbTransport.ready) { wbCloudPaint('off'); wbCloud.booted = true; return; }
+  if (!wbTransport.ready) {
+    // 区分「主动断开」和「从未配置」：前者给明确提示，后者安静停在单机模式
+    wbCloudPaint(wbTransport.reason === 'disconnected' ? 'disconnected' : 'off');
+    wbCloud.booted = true;
+    return;
+  }
   wbCloud.ready = true;
   wbCloud.booted = true;
   wbCloudPaint('idle');
