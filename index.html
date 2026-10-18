@@ -1907,6 +1907,7 @@ function loadData() {
       if (!DATA.docs) DATA.docs = f.docs;
       migrateDocsData(); // 文档中心旧版数据({items,currentCategory})自动升级为“分类+文档”新结构
       if (!DATA.grade) DATA.grade = gaDefault(); // 年级成绩分析：旧数据自动补齐
+      migrateGaClasses();                        // 班级名统一为「N班」（幂等，只改内存）
       if (!DATA.tips) DATA.tips = f.tips;
       if (!DATA.ai) DATA.ai = f.ai;
       // 科目体系迁移：旧数据为高考6科(含地理) → 苏州中考8科
@@ -4891,6 +4892,105 @@ function gaStuKey(s) {
   return String(s.cls || '') + '|' + String(s.name || '');
 }
 
+// ---------- 班级名归一化：一律统一为「N班」 ----------
+// 「10」「10.0」「10班」「初三10班」「（10）班」「０９班」→ 均为「N班」；
+// 不含数字的（如「实验班」）原样保留；数字 >= 1000 视为年份等非班号，也原样保留。
+function gaNormCls(v) {
+  var s = String(v == null ? '' : v).replace(/[\s\u3000]/g, '');
+  if (!s) return '';
+  s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  var m = /(\d+)(?:\.0+)?[）)]?\s*班/.exec(s);              // 「10班」「初三10班」「(10)班」
+  if (!m) m = /^[（(]?(\d+)(?:\.0+)?[）)]?$/.exec(s);       // 「10」「10.0」「(10)」
+  if (!m) return s;
+  var n = parseInt(m[1], 10);
+  return (n > 0 && n < 1000) ? n + '班' : s;
+}
+
+// 把本模块已有的班级名全部统一成「N班」（幂等）。返回被改写的条数。
+function gaNormalizeClasses() {
+  var d = ga(), changed = 0;
+  var clsList = [];
+  (d.teachers.classes || []).forEach(function(c) {
+    var n = gaNormCls(c);
+    if (n && n !== c) changed++;
+    if (n && clsList.indexOf(n) < 0) clsList.push(n);
+  });
+  d.teachers.classes = clsList;
+
+  var rows = d.teachers.rows || {}, nr = {};
+  Object.keys(rows).forEach(function(k) {
+    var n = gaNormCls(k) || k;
+    if (n !== k) changed++;
+    var src = rows[k] || {}, dst = nr[n] || (nr[n] = {});
+    Object.keys(src).forEach(function(s) {
+      if (src[s] !== undefined && src[s] !== '') dst[s] = src[s];
+    });
+  });
+  d.teachers.rows = nr;
+  Object.keys(nr).forEach(function(n) { if (n && clsList.indexOf(n) < 0) clsList.push(n); });
+
+  (d.exams || []).forEach(function(ex) {
+    (ex.students || []).forEach(function(s) {
+      var n = gaNormCls(s.cls);
+      if (n !== s.cls) { s.cls = n; changed++; }
+      // 学生身上的班级也并入清单，避免出现「有这个班的学生，班级清单里却没这个班」
+      if (n && clsList.indexOf(n) < 0) clsList.push(n);
+    });
+  });
+  clsList.sort(gaClsSort);
+  return changed;
+}
+
+// 启动时的静默迁移：只改内存，等后续任何一次自然保存再落盘（幂等，无害）
+function migrateGaClasses() {
+  try {
+    if (!DATA.grade) return 0;
+    return gaNormalizeClasses();
+  } catch (e) { return 0; }
+}
+
+// ---------- 分批导入配套：学生索引与匹配 ----------
+// 索引：考试号 / 班级+姓名 / 姓名（姓名可能重名，故存数组）
+function gaStuIndex(ex) {
+  var idx = { no: {}, cn: {}, name: {} };
+  (ex && ex.students || []).forEach(function(s) {
+    var no = String(s.no || '').trim();
+    var nm = String(s.name || '').replace(/[\s\u3000]/g, '');
+    var cls = String(s.cls || '');
+    if (no && !idx.no[no]) idx.no[no] = s;
+    if (cls && nm && !idx.cn[cls + '|' + nm]) idx.cn[cls + '|' + nm] = s;
+    if (nm) (idx.name[nm] || (idx.name[nm] = [])).push(s);
+  });
+  return idx;
+}
+
+function gaStuIndexAdd(idx, stu) {
+  var no = String(stu.no || '').trim();
+  var nm = String(stu.name || '').replace(/[\s\u3000]/g, '');
+  var cls = String(stu.cls || '');
+  if (no && !idx.no[no]) idx.no[no] = stu;
+  if (cls && nm && !idx.cn[cls + '|' + nm]) idx.cn[cls + '|' + nm] = stu;
+  if (nm) (idx.name[nm] || (idx.name[nm] = [])).push(stu);
+}
+
+// 匹配优先级：考试号 → 班级+姓名 → 姓名唯一。
+// 返回 {stu, how}；姓名重名且无法用班级区分时返回 {ambiguous:true, cands:[...]}；完全没有则 null。
+function gaMatchStudent(idx, nm, cls, no) {
+  if (no && idx.no[no]) return { stu: idx.no[no], how: 'no' };
+  if (cls && idx.cn[cls + '|' + nm]) return { stu: idx.cn[cls + '|' + nm], how: 'cn' };
+  var arr = idx.name[nm];
+  if (arr && arr.length === 1) return { stu: arr[0], how: 'name' };
+  if (arr && arr.length > 1) {
+    if (cls) {
+      for (var i = 0; i < arr.length; i++) {
+        if (String(arr[i].cls || '') === cls) return { stu: arr[i], how: 'cn' };
+      }
+    }
+    return { ambiguous: true, cands: arr };
+  }
+  return null;
+}
+
 // 单科分数线（惰性补齐预设）
 function gaLine(exam, subj) {
   if (!exam.lines) exam.lines = {};
@@ -5142,6 +5242,7 @@ function gaExamBar(ex) {
       '<button class="btn btn-default btn-sm" onclick="gaRenameExam(' + ex.id + ')">重命名</button>' +
       '<button class="btn btn-danger btn-sm" onclick="gaDelExam(' + ex.id + ')">删除本考试</button></span>';
   }
+  html += '<button class="btn btn-primary btn-sm" style="margin-left:8px" onclick="gaExportXlsxOpen()">⬇ 导出 Excel</button>';
   html += '</div></div>';
   return html;
 }
@@ -5177,9 +5278,10 @@ function gaAvgHTML(ex) {
   allVals.push(schoolVs);
   allT.push(gaTotalAvgOf(ex, ''));
   var rkAll = subs.map(function(_, i) {
-    return gaRankOf(allVals.map(function(v) { return v[i]; }));
+    // 名次只在「各班」之间比较，全校汇总行不参与排名
+    return gaRankOf(allVals.slice(0, classes.length).map(function(v) { return v[i]; }));
   });
-  var rkT = gaRankOf(allT);
+  var rkT = gaRankOf(allT.slice(0, classes.length));
   var si = classes.length;
 
   html += '<div class="card"><div class="card-title">📊 各科均分 · 各班均分与班级名次</div>' +
@@ -5465,7 +5567,12 @@ function gaRosterEdit(stuId, field, val) {
   var stu = null;
   (ex.students || []).forEach(function(s) { if (s.id === stuId) stu = s; });
   if (!stu) return;
-  if (field === 'name' || field === 'cls' || field === 'no') stu[field] = String(val).trim();
+  if (field === 'cls') {
+    stu.cls = gaNormCls(val);
+    var dd = ga();
+    if (stu.cls && dd.teachers.classes.indexOf(stu.cls) < 0) dd.teachers.classes.push(stu.cls);
+  }
+  else if (field === 'name' || field === 'no') stu[field] = String(val).trim();
   else {
     if (!stu.scores) stu.scores = {};
     var t = String(val).trim();
@@ -5628,6 +5735,7 @@ function gaTeacherHTML() {
   var d = ga(), subs = d.subjects, classes = gaClasses();
   var html = '<div class="card"><div class="card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">👩‍🏫 各班任课教师' +
     '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
+    '<button class="btn btn-primary btn-sm" onclick="gaExportXlsxOpen()">⬇ 导出 Excel</button>' +
     '<button class="btn btn-primary btn-sm" onclick="gaSaveTeachers()">保存教师表</button>' +
     '<button class="btn btn-default btn-sm" onclick="gaImportTeacherOpen()">📥 从 Excel 导入</button>' +
     '</span></div>';
@@ -5724,9 +5832,11 @@ function gaDataHTML(ex) {
     '<div class="flex gap" style="flex-wrap:wrap;margin-bottom:10px">' +
     '<button class="btn btn-primary" onclick="gaImportOpen()">＋ 导入成绩（Excel / CSV）</button>' +
     '<button class="btn btn-default" onclick="gaLoadSample()">载入示例数据</button>' +
+    '<button class="btn btn-default" onclick="gaNormalizeClsRun()">🔢 统一班级名格式</button>' +
     (ex ? '<button class="btn btn-default" onclick="gaExportCSV()">⬇ 导出当前成绩 CSV</button>' : '') +
     '</div>' +
-    '<p class="ga-tip" style="margin:0">支持 <b>.xlsx</b>（可选择任意工作表）、<b>.csv</b>（建议 UTF-8 编码）与<b>直接粘贴</b>表格数据。列名只要包含「姓名」「班级」「考试号」以及各科目名称即可自动识别；某科留空即视为该生该科<b>缺考</b>，缺考学生不计入年级排名。<br>导入后可在「📊 均分与排名」页勾选<b>「计入总分/排名的科目」</b>（如初二期末未考化学，取消勾选即可，不会因缺化学分而被判缺考）；也可到「👥 成绩名单」页<b>直接修改任何一条成绩</b>，或按班级筛选查阅。</p></div>';
+    '<p class="ga-tip" style="margin:0 0 8px">支持 <b>.xlsx</b>（可选择任意工作表）、<b>.csv</b>（建议 UTF-8 编码）与<b>直接粘贴</b>表格数据。列名只要包含「姓名」「班级」「考试号」以及各科目名称即可自动识别；某科留空即视为该生该科<b>缺考</b>，缺考学生不计入年级排名。<br>导入后可在「📊 均分与排名」页勾选<b>「计入总分/排名的科目」</b>（如初二期末未考化学，取消勾选即可，不会因缺化学分而被判缺考）；也可到「👥 成绩名单」页<b>直接修改任何一条成绩</b>，或按班级筛选查阅。</p>' +
+    '<p class="ga-tip" style="margin:0"><b>分科目分批导入</b>：语文、数学、英语…若是分开的文件，先用第一份<b>新建一场考试</b>，之后每份文件都选<b>「合并到已有考试」</b>并选中同一场考试即可 —— 系统按<b>姓名</b>自动把各科成绩归到同一名学生名下（优先考试号，其次 班级+姓名），名字对不上的自动建为新学生。同名重名的会列出来让你手工确认，绝不猜着写。合并时<b>只写入有数字的单元格，空白一律保留原分数不动</b>。<br><b>班级名</b>一律归一成「<b>N班</b>」：文件里写 <code>10</code>、<code>10.0</code>、<code>10班</code>、<code>初三10班</code> 都会归到「10班」，已建班级名也一并统一。</p></div>';
 
   html += '<div class="card"><div class="card-title">📚 已导入考试（' + d.exams.length + '）</div>';
   if (!d.exams.length) html += '<div class="empty">还没有导入任何考试</div>';
@@ -5755,6 +5865,14 @@ function gaDataHTML(ex) {
     '</ul>' +
     '<div class="mt"><button class="btn btn-danger btn-sm" onclick="gaClearGrade()">清空本模块数据</button></div></div>';
   return html;
+}
+
+// 手动跑一次班级名统一（幂等）
+function gaNormalizeClsRun() {
+  var n = gaNormalizeClasses();
+  _gaRankCache = {};
+  if (n > 0) { save(); renderPage(); toast('已统一 ' + n + ' 处班级名（一律「N班」格式）'); }
+  else { renderPage(); toast('班级名已经是统一格式，无需改动'); }
 }
 
 function gaGo(t) { gaTab = t; renderPage(); }
@@ -5803,13 +5921,34 @@ function gaClearGrade() {
 }
 
 // ---------- 导入：文件 / 粘贴 ----------
+function gaImpRadio() {
+  var r = document.getElementsByName('ga-im-mode');
+  for (var i = 0; i < r.length; i++) if (r[i].checked) return r[i].value;
+  return 'new';
+}
+
 function gaImportOpen() {
-  _gaImp = { buffer: null, sheets: null, rows: null, head: null, map: null, hi: null };
+  _gaImp = { buffer: null, sheets: null, rows: null, head: null, map: null, hi: null,
+             targetId: null, manualSubj: '', match: null };
+  var d = ga();
+  var exOpts = d.exams.map(function(e) {
+    return '<option value="' + e.id + '"' + (e.id === d.curId ? ' selected' : '') + '>' + esc(e.name) + '　（' + (e.students || []).length + ' 人 · ' + esc(e.date || '—') + '）</option>';
+  }).join('');
+  var canMerge = d.exams.length > 0;
   openModal('<div class="modal-header"><h3>导入成绩数据</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div>' +
     '<div class="modal-body">' +
+    '<div class="form-group"><label>导入方式</label><div class="flex gap" style="gap:18px;flex-wrap:wrap">' +
+    '<label class="muted" style="font-size:13px;display:inline-flex;align-items:center;gap:4px"><input type="radio" name="ga-im-mode" value="new" checked onchange="gaImportModeChange()"> 新建一场考试</label>' +
+    '<label class="muted" style="font-size:13px;display:inline-flex;align-items:center;gap:4px"><input type="radio" name="ga-im-mode" value="merge"' + (canMerge ? '' : ' disabled') + ' onchange="gaImportModeChange()"> 合并到已有考试（分科目分批导入）</label>' +
+    '</div>' + (canMerge ? '' : '<div class="ga-tip" style="margin-top:6px">还没有任何考试，请先用「新建一场考试」导入第一份成绩。</div>') + '</div>' +
+    '<div id="ga-im-new-wrap">' +
     '<div class="flex gap" style="flex-wrap:wrap">' +
     '<div class="form-group"><label>考试名称</label><input id="ga-im-name" placeholder="如：2026学年第一学期期末考试"></div>' +
     '<div class="form-group" style="max-width:190px"><label>考试日期</label><input id="ga-im-date" type="date" value="' + todayStr() + '"></div>' +
+    '</div></div>' +
+    '<div id="ga-im-merge-wrap" style="display:none">' +
+    '<div class="form-group"><label>合并到哪场考试</label><select id="ga-im-target" onchange="gaImportTargetChange()">' + exOpts + '</select></div>' +
+    '<p class="ga-tip" style="margin:0 0 10px;line-height:1.8">按<b>姓名</b>匹配已有学生（优先考试号，其次 班级+姓名）；只写入文件里<b>有数字</b>的成绩，空白单元格<b>保留原分数不动</b>；姓名对不上的学生自动建为新学生。班级列的数字会自动归一成「<b>N班</b>」。</p>' +
     '</div>' +
     '<div class="form-group"><label>选择文件（.xlsx / .csv / .txt）</label>' +
     '<input type="file" id="ga-im-file" accept=".xlsx,.csv,.txt" onchange="gaImportPick(this)"></div>' +
@@ -5821,6 +5960,22 @@ function gaImportOpen() {
     '<div class="flex gap mt"><button class="btn btn-primary" id="ga-im-ok" onclick="gaImportCommit()" disabled>确认导入</button>' +
     '<button class="btn btn-default" onclick="gaImportPasteMode()">改为粘贴数据</button></div>' +
     '</div>', 'modal-lg');
+}
+
+function gaImportModeChange() {
+  var merge = gaImpRadio() === 'merge';
+  var w1 = el('ga-im-new-wrap'), w2 = el('ga-im-merge-wrap');
+  if (w1) w1.style.display = merge ? 'none' : '';
+  if (w2) w2.style.display = merge ? '' : 'none';
+  var sel = el('ga-im-target');
+  _gaImp.targetId = (merge && sel && sel.value) ? Number(sel.value) : null;
+  gaImportAfterRows();
+}
+
+function gaImportTargetChange() {
+  var sel = el('ga-im-target');
+  _gaImp.targetId = (sel && sel.value) ? Number(sel.value) : null;
+  gaImportAfterRows();
 }
 
 function gaImportPasteMode() {
@@ -5892,23 +6047,53 @@ function gaImportParse() {
 }
 
 // 表头识别：找到含“姓名”的行
+function gaImpCell(v) { return String(v == null ? '' : v).replace(/[\s\u3000]/g, ''); }
+
+// 兜底用：排除 姓名/班级/考号/序号/排名 等列后，挑一个成绩列
+function gaPickScoreCol(head, used) {
+  for (var ci = 0; ci < head.length; ci++) {
+    if (used.indexOf(ci) >= 0) continue;
+    var hh = gaImpCell(head[ci]);
+    if (/序号|编号|排名|名次|总分|平均|备注|说明|考号|学号|姓名|班级|^班$/.test(hh)) continue;
+    return ci;
+  }
+  return -1;
+}
+
+function gaImportManualSubj(v) {
+  if (!_gaImp.manual || !v || !_gaImp.map) return;
+  delete _gaImp.map.subs[_gaImp.manual.subj];
+  _gaImp.manual.subj = v;
+  _gaImp.map.subs[v] = _gaImp.manual.col;
+  _gaImp.manualSubj = v;
+  gaImportAfterRows();
+}
+
 function gaImportAfterRows() {
   var rows = _gaImp.rows;
   var msg = el('ga-im-msg'), pv = el('ga-im-preview'), ok = el('ga-im-ok');
-  if (!rows || !rows.length) {
+  if (!rows) {
+    if (msg) msg.innerHTML = '';
+    if (pv) pv.innerHTML = '';
+    if (ok) ok.disabled = true;
+    return;
+  }
+  if (!rows.length) {
     if (msg) msg.innerHTML = '<span style="color:var(--danger)">没有读取到任何数据行</span>';
     if (ok) ok.disabled = true;
     return;
   }
   var subs = gaSubjects();
-  var hi = -1;
+  var hi = -1, hiLoose = -1;
   for (var i = 0; i < Math.min(rows.length, 15); i++) {
-    var r = (rows[i] || []).map(function(x) { return String(x == null ? '' : x).replace(/[\s\u3000]/g, ''); });
+    var r = (rows[i] || []).map(gaImpCell);
     var hasName = r.indexOf('姓名') >= 0 || r.indexOf('学生姓名') >= 0 || r.indexOf('名字') >= 0;
     var hasCls = r.indexOf('班级') >= 0;
     var hasSub = subs.some(function(s) { return r.some(function(c) { return c.indexOf(s) >= 0; }); });
     if (hasName && (hasCls || hasSub)) { hi = i; break; }
+    if (hasName && hiLoose < 0) hiLoose = i;   // 只有「姓名」也先记下，后面靠手动指定科目兜底
   }
+  if (hi < 0) hi = hiLoose;
   if (hi < 0) {
     if (msg) msg.innerHTML = '<span style="color:var(--danger)">未能识别表头：请确认表格首行包含「姓名」以及「班级」或各科目名称（如 语文、数学…）。</span>';
     if (pv) pv.innerHTML = '';
@@ -5933,50 +6118,133 @@ function gaImportAfterRows() {
     return;
   }
   var subFound = subs.filter(function(s) { return map.subs[s] !== undefined; });
+  var manualNote = '';
   if (!subFound.length) {
-    if (msg) msg.innerHTML = '<span style="color:var(--danger)">未识别到任何科目列（当前科目：' + esc(subs.join('、')) + '）。可到「👩‍🏫 任课教师」页添加科目后重试。</span>';
-    if (ok) ok.disabled = true;
-    return;
+    var sc = -1;
+    if (_gaImp.manual && _gaImp.manual.col >= 0 && _gaImp.manual.col < head.length) {
+      sc = _gaImp.manual.col;
+      map.subs[_gaImp.manual.subj] = sc;
+      subFound = [_gaImp.manual.subj];
+    } else {
+      sc = gaPickScoreCol(head, [map.name, map.cls, map.no].filter(function(x) { return x >= 0; }));
+      if (sc >= 0) {
+        _gaImp.manual = { subj: subs[0], col: sc };
+        _gaImp.manualSubj = subs[0];
+        map.subs[subs[0]] = sc;
+        subFound = [subs[0]];
+      }
+    }
+    if (!subFound.length) {
+      if (msg) msg.innerHTML = '<span style="color:var(--danger)">未识别到任何科目列（当前科目：' + esc(subs.join('、')) + '）。可到「👩‍🏫 任课教师」页添加科目后重试。</span>';
+      if (pv) pv.innerHTML = '';
+      if (ok) ok.disabled = true;
+      return;
+    }
+    manualNote = '<div class="ga-tip" style="margin:0 0 8px">表头里没有科目名，已把「' + esc(head[sc] || ('第' + (sc + 1) + '列')) + '」当作 <select onchange="gaImportManualSubj(this.value)" style="padding:2px 4px">' +
+      subs.map(function(s) { return '<option value="' + esc(s) + '"' + (s === _gaImp.manualSubj ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') +
+      '</select> 的成绩导入；如不符请切换。</div>';
+  } else {
+    _gaImp.manual = null;
+    _gaImp.manualSubj = '';
   }
   var body = rows.slice(hi + 1).filter(function(r) {
     return r && r.length && String(r[map.name] == null ? '' : r[map.name]).trim();
   });
-  var pre = '<div class="ga-tip" style="margin:10px 0 4px">识别到 <b>' + body.length + '</b> 条学生记录；科目列：' +
+
+  // 合并模式：先算出匹配结果，让人在导入前就能看清会发生什么
+  var tex = _gaImp.targetId ? gaExamById(_gaImp.targetId) : null;
+  var idx = tex ? gaStuIndex(tex) : null;
+  var stat = { matched: 0, created: 0, amb: 0, overwrite: 0, addScore: 0, keep: 0 };
+  var marks = [];
+  body.forEach(function(r) {
+    var nm = gaImpCell(r[map.name]);
+    var cls = map.cls >= 0 ? gaNormCls(r[map.cls]) : '';
+    var no = map.no >= 0 ? gaImpCell(r[map.no]) : '';
+    var mk = { cls: cls, t: '' };
+    if (idx) {
+      var hit = gaMatchStudent(idx, nm, cls, no);
+      if (hit && hit.ambiguous) { mk.t = 'amb'; stat.amb++; }
+      else if (hit) {
+        mk.t = 'hit'; stat.matched++;
+        subFound.forEach(function(s) {
+          var v = gaNum(r[map.subs[s]]);
+          var old = gaNum(hit.stu.scores ? hit.stu.scores[s] : null);
+          if (v === null) { if (old !== null) stat.keep++; }
+          else if (old !== null) stat.overwrite++;
+          else stat.addScore++;
+        });
+      } else {
+        mk.t = 'new'; stat.created++;
+        subFound.forEach(function(s) { if (gaNum(r[map.subs[s]]) !== null) stat.addScore++; });
+      }
+    }
+    marks.push(mk);
+  });
+  _gaImp.match = stat;
+
+  var pre = manualNote + '<div class="ga-tip" style="margin:10px 0 4px">识别到 <b>' + body.length + '</b> 条学生记录；科目列：' +
     esc(subFound.join('、')) + (map.cls >= 0 ? '；班级列：' + esc(head[map.cls]) : '') +
-    (map.no >= 0 ? '；考试号列：' + esc(head[map.no]) : '') + '</div>' +
-    '<div class="ga-scroll" style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
-    '<table class="ga-tbl"><thead><tr><th>姓名</th><th>班级</th>';
+    (map.no >= 0 ? '；考试号列：' + esc(head[map.no]) : '') + '</div>';
+  if (idx) {
+    pre += '<div class="ga-tip" style="margin:0 0 6px">匹配到已有学生 <b>' + stat.matched + '</b> 人 · 自动新增 <b>' + stat.created +
+      '</b> 人' + (stat.amb ? ' · <span style="color:var(--warning)">重名待定 ' + stat.amb + ' 人</span>' : '') +
+      '；本次写入 <b>' + (stat.addScore + stat.overwrite) + '</b> 个成绩' +
+      (stat.overwrite ? '（其中覆盖已有分 ' + stat.overwrite + ' 个）' : '') +
+      (stat.keep ? '；<b>' + stat.keep + '</b> 处空白保留原分不动' : '') + '</div>';
+  }
+  pre += '<div class="ga-scroll" style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
+    '<table class="ga-tbl"><thead><tr>' + (idx ? '<th>匹配</th>' : '') + '<th>姓名</th><th>班级</th>';
   subFound.forEach(function(s) { pre += '<th>' + esc(s) + '</th>'; });
   pre += '</tr></thead><tbody>';
-  body.slice(0, 8).forEach(function(r) {
-    pre += '<tr><td>' + esc(r[map.name]) + '</td><td>' + esc(map.cls >= 0 ? r[map.cls] : '') + '</td>';
+  body.slice(0, 10).forEach(function(r, i) {
+    var mk = marks[i] || {};
+    pre += '<tr>';
+    if (idx) pre += '<td>' + (mk.t === 'hit' ? '✅ 已有' : mk.t === 'new' ? '＋ 新增' : '⚠️ 重名') + '</td>';
+    pre += '<td>' + esc(r[map.name]) + '</td><td>' + esc(map.cls >= 0 ? (mk.cls || '') : '') + '</td>';
     subFound.forEach(function(s) { pre += '<td class="ga-num">' + esc(r[map.subs[s]]) + '</td>'; });
     pre += '</tr>';
   });
   pre += '</tbody></table></div>';
-  if (body.length > 8) pre += '<div class="ga-tip" style="margin-top:4px">… 仅预览前 8 条，共 ' + body.length + ' 条</div>';
+  if (body.length > 10) pre += '<div class="ga-tip" style="margin-top:4px">… 仅预览前 10 条，共 ' + body.length + ' 条</div>';
   if (pv) pv.innerHTML = pre;
   if (msg) msg.innerHTML = '';
   if (ok) ok.disabled = body.length === 0;
 }
 
+// 当前文件实际会导入的科目（含手动指定的兜底）
+function gaImpSubFound() {
+  var subs = gaSubjects(), map = _gaImp.map || { subs: {} };
+  return subs.filter(function(s) { return map.subs[s] !== undefined; });
+}
+
 function gaImportCommit() {
   var rows = _gaImp.rows, map = _gaImp.map;
   if (!rows || !rows.length || !map) return;
+  var subFound = gaImpSubFound();
+  if (!subFound.length) { toast('未识别到科目列，无法导入', 'error'); return; }
+  var skipTo = (_gaImp.hi === undefined || _gaImp.hi === null) ? -1 : _gaImp.hi;
+  if (_gaImp.targetId) {
+    var tex = gaExamById(_gaImp.targetId);
+    if (!tex) { toast('目标考试不存在，请重新选择', 'error'); return; }
+    gaImportMergeInto(tex, rows, map, subFound, skipTo);
+  } else {
+    gaImportCreateNew(rows, map, subFound, skipTo);
+  }
+}
+
+function gaImportCreateNew(rows, map, subFound, skipTo) {
   var subs = gaSubjects();
-  var subFound = subs.filter(function(s) { return map.subs[s] !== undefined; });
   var nameEl = el('ga-im-name'), dateEl = el('ga-im-date');
   var name = (nameEl && nameEl.value.trim()) || ('导入考试 ' + todayStr());
   var date = (dateEl && dateEl.value) || todayStr();
 
   var d = ga();
   var students = [], added = {};
-  var skipTo = (_gaImp.hi === undefined || _gaImp.hi === null) ? -1 : _gaImp.hi;
   rows.forEach(function(r, ri) {
     if (!r || ri <= skipTo) return;
     var nm = String(r[map.name] == null ? '' : r[map.name]).trim();
     if (!nm) return;
-    var cls = map.cls >= 0 ? String(r[map.cls] == null ? '' : r[map.cls]).trim() : '';
+    var cls = map.cls >= 0 ? gaNormCls(r[map.cls]) : '';
     var no = map.no >= 0 ? String(r[map.no] == null ? '' : r[map.no]).trim() : '';
     var scores = {};
     subs.forEach(function(s) {
@@ -5993,10 +6261,88 @@ function gaImportCommit() {
   };
   d.exams.push(ex);
   d.curId = ex.id;
+  gaNormalizeClasses();
   _gaRankCache = {};
   gaTab = 'avg';
   save(); closeModalForce(); renderPage();
-  toast('已导入「' + name + '」共 ' + students.length + ' 名学生' + (subFound.length ? '（' + subFound.join('/') + '）' : ''));
+  toast('已导入「' + name + '」共 ' + students.length + ' 名学生（' + subFound.join('/') + '）');
+}
+
+// 分科目分批导入：把本文件的科目成绩按姓名合并进已有考试
+function gaImportMergeInto(ex, rows, map, subFound, skipTo) {
+  var d = ga(), subs = gaSubjects();
+  var idx = gaStuIndex(ex);
+  var stat = { matched: 0, created: 0, amb: [], wrote: 0, overwrite: 0, keep: 0, recls: 0 };
+  var ambMap = {};
+  rows.forEach(function(r, ri) {
+    if (!r || ri <= skipTo) return;
+    var nmRaw = String(r[map.name] == null ? '' : r[map.name]).trim();
+    var nmKey = gaImpCell(r[map.name]);
+    if (!nmKey) return;
+    var cls = map.cls >= 0 ? gaNormCls(r[map.cls]) : '';
+    var no = map.no >= 0 ? gaImpCell(r[map.no]) : '';
+    var hit = gaMatchStudent(idx, nmKey, cls, no);
+    if (hit && hit.ambiguous) {
+      var kk = nmRaw + '|' + cls;
+      if (!ambMap[kk]) {
+        ambMap[kk] = 1;
+        stat.amb.push({ name: nmRaw, cls: cls, inCls: (hit.cands || []).map(function(s) { return s.cls || '未分班'; }).join('、') });
+      }
+      return;   // 重名无法唯一确定 → 跳过，绝不凭猜写入
+    }
+    var stu;
+    if (hit) { stu = hit.stu; stat.matched++; }
+    else {
+      stu = { id: 0, name: nmRaw, cls: cls, no: no, scores: {} };
+      subs.forEach(function(s) { stu.scores[s] = null; });
+      stu.id = uid(ex.students);
+      ex.students.push(stu);
+      gaStuIndexAdd(idx, stu);
+      stat.created++;
+    }
+    if (cls && stu.cls !== cls) { stu.cls = cls; stat.recls++; }
+    if (no && !stu.no) stu.no = no;
+    if (!stu.scores) stu.scores = {};
+    subFound.forEach(function(s) {
+      var v = gaNum(r[map.subs[s]]);
+      var old = gaNum(stu.scores[s]);
+      if (v === null) { if (old !== null) stat.keep++; return; }   // 空白 → 保留原分数不动
+      if (old !== null) stat.overwrite++;
+      stu.scores[s] = v;
+      stat.wrote++;
+    });
+  });
+  // 只有重名待定时也要走弹窗，否则用户无从知道「为什么没写进去」
+  if (!stat.matched && !stat.created && !stat.amb.length) { toast('本文件没有可用数据', 'error'); return; }
+
+  gaNormalizeClasses();                                  // 顺手把存量班级名统一为「N班」
+  if (stat.wrote || stat.created) { d.curId = ex.id; gaTab = 'avg'; }
+  _gaRankCache = {};
+  save(); closeModalForce(); renderPage();
+  if (stat.amb.length) gaImportResultModal(ex.name, stat, subFound);
+  else toast('已把 ' + subFound.join('/') + ' 合并进「' + ex.name + '」：写入 ' + stat.wrote +
+    ' 个成绩、新增 ' + stat.created + ' 人' + (stat.keep ? '、保留原分 ' + stat.keep + ' 处' : ''));
+}
+
+function gaImportResultModal(exName, stat, subFound) {
+  var html = '<div class="modal-header"><h3>合并结果</h3><button class="modal-close" onclick="closeModalForce()">&times;</button></div>' +
+    '<div class="modal-body">' +
+    '<p style="margin:0 0 8px">已将 <b>' + esc(subFound.join('、')) + '</b> 的成绩合并到「<b>' + esc(exName) + '</b>」：</p>' +
+    '<ul class="ga-tip" style="margin:0 0 10px;padding-left:20px;line-height:2">' +
+    '<li>写入成绩 <b>' + stat.wrote + '</b> 个' + (stat.overwrite ? '（其中覆盖原有分数 ' + stat.overwrite + ' 个）' : '') + '</li>' +
+    '<li>空白单元格保留原分不动：<b>' + stat.keep + '</b> 处</li>' +
+    '<li>匹配到已有学生 <b>' + stat.matched + '</b> 人；自动新增 <b>' + stat.created + '</b> 人</li>' +
+    (stat.recls ? '<li>按文件更新班级归属：<b>' + stat.recls + '</b> 人</li>' : '') +
+    '</ul>' +
+    '<div class="card" style="padding:10px;margin:0"><div class="card-title" style="font-size:13px">⚠️ 重名无法唯一确定（' + stat.amb.length + ' 人，已跳过未写入）</div>' +
+    '<div class="ga-scroll" style="max-height:180px;overflow:auto"><table class="ga-tbl"><thead><tr><th>姓名</th><th>文件里的班级</th><th>名单中同名者所在班级</th></tr></thead><tbody>' +
+    stat.amb.map(function(x) {
+      return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.cls || '—') + '</td><td>' + esc(x.inCls) + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div><p class="ga-tip" style="margin:8px 0 0">这些学生没有写入，请到「👥 成绩名单」页按班级手工补录。</p></div>' +
+    '<div class="flex gap mt"><button class="btn btn-primary" onclick="closeModalForce()">知道了</button></div>' +
+    '</div>';
+  openModal(html, 'modal-lg');
 }
 
 // ---------- 教师表导入 ----------
@@ -6098,7 +6444,7 @@ function gaTCommit() {
   var n = 0;
   rows.forEach(function(r) {
     if (!r) return;
-    var cls = String(r[cm.cls] == null ? '' : r[cm.cls]).trim();
+    var cls = gaNormCls(r[cm.cls]);
     if (!cls || cls === '班级') return;
     var trow = d.teachers.rows[cls] || (d.teachers.rows[cls] = {});
     if (cm.master >= 0) trow['班主任'] = String(r[cm.master] == null ? '' : r[cm.master]).replace(/[\s\u3000]/g, '');
@@ -6136,6 +6482,644 @@ function gaExportCSV() {
   toast('已导出 CSV');
 }
 
+// ============================================================
+//  年级成绩分析 · 导出 Excel
+//  按《期末考试质量分析 2026.06.xlsx》的版式生成真正的 .xlsx
+//  纯前端实现：OOXML + ZIP(STORE)，零外部依赖
+// ============================================================
+var XA_STY = { d: 0, h: 1, t: 2, n: 3, p: 4, i: 5, title: 6, l: 7, bt: 8, bn: 9, bp: 10, bi: 11, off: 12, up: 13, dn: 14 };
+
+function xaColName(n) {
+  var s = '';
+  n = Math.floor(n);
+  while (n > 0) {
+    var m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || 'A';
+}
+
+function xaXmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function xaUtf8(s) {
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(s);
+  var out = [], i, c;
+  for (i = 0; i < s.length; i++) {
+    c = s.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+    else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
+      var c2 = s.charCodeAt(++i);
+      var cp = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+      out.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+    } else out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return new Uint8Array(out);
+}
+
+var _xaCrcTab = null;
+function xaCrc32(u8) {
+  if (!_xaCrcTab) {
+    _xaCrcTab = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      _xaCrcTab[n] = c >>> 0;
+    }
+  }
+  var crc = 0xFFFFFFFF;
+  for (var i = 0; i < u8.length; i++) crc = _xaCrcTab[(crc ^ u8[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function xaConcat(list) {
+  var n = 0, i;
+  for (i = 0; i < list.length; i++) n += list[i].length;
+  var out = new Uint8Array(n), p = 0;
+  for (i = 0; i < list.length; i++) { out.set(list[i], p); p += list[i].length; }
+  return out;
+}
+
+// ZIP（不压缩，method=0）。xlsx 只是一堆 XML 的压缩包，STORE 模式 Excel 完全接受。
+function xaZip(files) {
+  var parts = [], central = [], offsets = [], pos = 0, i;
+  for (i = 0; i < files.length; i++) {
+    var f = files[i];
+    var name = xaUtf8(f.name);
+    var data = f.data;
+    var crc = xaCrc32(data);
+    var lh = new Uint8Array(30 + name.length);
+    var dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true);   // UTF-8 文件名
+    dv.setUint16(8, 0, true);        // STORE
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, 0x21, true);    // 1980-01-01
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, data.length, true);
+    dv.setUint32(22, data.length, true);
+    dv.setUint16(26, name.length, true);
+    dv.setUint16(28, 0, true);
+    lh.set(name, 30);
+    parts.push(lh, data);
+    offsets.push(pos);
+    pos += lh.length + data.length;
+  }
+  var cdStart = pos, cdSize = 0;
+  for (i = 0; i < files.length; i++) {
+    var f2 = files[i];
+    var nm = xaUtf8(f2.name);
+    var crc2 = xaCrc32(f2.data);
+    var ch = new Uint8Array(46 + nm.length);
+    var cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0x21, true);
+    cv.setUint32(16, crc2, true);
+    cv.setUint32(20, f2.data.length, true);
+    cv.setUint32(24, f2.data.length, true);
+    cv.setUint16(28, nm.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offsets[i], true);
+    ch.set(nm, 46);
+    central.push(ch);
+    cdSize += ch.length;
+  }
+  var eocd = new Uint8Array(22);
+  var ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, cdStart, true);
+  ev.setUint16(20, 0, true);
+  return xaConcat(parts.concat(central, [eocd]));
+}
+
+function xaStylesXml() {
+  function xf(fmt, font, fill, border, align) {
+    return '<xf numFmtId="' + fmt + '" fontId="' + font + '" fillId="' + fill + '" borderId="' + border + '" xfId="0"' +
+      (fmt ? ' applyNumberFormat="1"' : '') +
+      (font ? ' applyFont="1"' : '') +
+      (fill ? ' applyFill="1"' : '') +
+      (border ? ' applyBorder="1"' : '') +
+      (align ? ' applyAlignment="1"' : '') + '>' +
+      (align ? '<alignment ' + align + '/>' : '') + '</xf>';
+  }
+  var C = 'horizontal="center" vertical="center"';
+  var xfs = [
+    xf(0, 0, 0, 0, ''),                                        // 0 默认
+    xf(0, 1, 2, 1, C + ' wrapText="1"'),                        // 1 表头
+    xf(0, 0, 0, 1, C),                                          // 2 文本
+    xf(164, 0, 0, 1, C),                                        // 3 两位小数
+    xf(165, 0, 0, 1, C),                                        // 4 百分比
+    xf(0, 0, 0, 1, C),                                          // 5 整数/名次
+    xf(0, 2, 0, 0, C),                                          // 6 大标题
+    xf(0, 0, 0, 1, 'horizontal="left" vertical="center"'),      // 7 左对齐
+    xf(0, 1, 3, 1, C),                                          // 8 汇总文本
+    xf(164, 1, 3, 1, C),                                        // 9 汇总两位小数
+    xf(165, 1, 3, 1, C),                                        // 10 汇总百分比
+    xf(0, 1, 3, 1, C),                                          // 11 汇总整数
+    xf(0, 3, 0, 1, C),                                          // 12 灰色（缺考/无效）
+    xf(164, 4, 0, 1, C),                                        // 13 红色 + 两位小数（进步）
+    xf(164, 5, 0, 1, C)                                         // 14 绿色 + 两位小数（退步）
+  ];
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="2"><numFmt numFmtId="164" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.00%"/></numFmts>' +
+    '<fonts count="6">' +
+    '<font><sz val="11"/><name val="宋体"/><family val="2"/></font>' +
+    '<font><b/><sz val="11"/><name val="宋体"/><family val="2"/></font>' +
+    '<font><b/><sz val="16"/><name val="宋体"/><family val="2"/></font>' +
+    '<font><sz val="11"/><color rgb="FF808080"/><name val="宋体"/><family val="2"/></font>' +
+    '<font><sz val="11"/><color rgb="FFCC0000"/><name val="宋体"/><family val="2"/></font>' +
+    '<font><sz val="11"/><color rgb="FF006100"/><name val="宋体"/><family val="2"/></font>' +
+    '</fonts>' +
+    '<fills count="4">' +
+    '<fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF93CDDD"/><bgColor indexed="64"/></patternFill></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
+    '<borders count="2">' +
+    '<border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right>' +
+    '<top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border>' +
+    '</borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="' + xfs.length + '">' + xfs.join('') + '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="常规" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+}
+
+function xaSheetXml(sh) {
+  var rows = sh.rows || [], cols = sh.cols || [];
+  var maxCol = cols.length, i;
+  for (i = 0; i < rows.length; i++) if (rows[i] && rows[i].length > maxCol) maxCol = rows[i].length;
+  if (maxCol < 1) maxCol = 1;
+  var maxRow = Math.max(rows.length, 1);
+
+  var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' +
+    '<dimension ref="A1:' + xaColName(maxCol) + maxRow + '"/>';
+
+  if (sh.freeze) {
+    var fz = sh.freeze;
+    xml += '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' + fz + '" topLeftCell="A' + (fz + 1) +
+      '" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A' + (fz + 1) +
+      '" sqref="A' + (fz + 1) + '"/></sheetView></sheetViews>';
+  } else {
+    xml += '<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
+  }
+  xml += '<sheetFormatPr defaultRowHeight="18"/>';
+
+  if (cols.length) {
+    xml += '<cols>';
+    for (i = 0; i < cols.length; i++) {
+      xml += '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + cols[i] + '" customWidth="1"/>';
+    }
+    xml += '</cols>';
+  }
+
+  xml += '<sheetData>';
+  for (var ri = 0; ri < rows.length; ri++) {
+    var r = ri + 1, row = rows[ri];
+    var ht = (sh.rh && sh.rh[r]) || (ri === 0 ? 28 : 20);
+    if (!row) { xml += '<row r="' + r + '" ht="8" customHeight="1"/>'; continue; }
+    xml += '<row r="' + r + '" ht="' + ht + '" customHeight="1">';
+    for (var ci = 0; ci < row.length; ci++) {
+      var cell = row[ci];
+      if (cell === null || cell === undefined) continue;
+      var ref = xaColName(ci + 1) + r;
+      var si = XA_STY[cell.s];
+      if (si === undefined) si = 0;
+      var style = si ? ' s="' + si + '"' : '';
+      var v = cell.v;
+      if (v === null || v === undefined || v === '') {
+        xml += '<c r="' + ref + '"' + style + '/>';
+      } else if (typeof v === 'number') {
+        if (!isFinite(v)) { xml += '<c r="' + ref + '"' + style + '/>'; }
+        else xml += '<c r="' + ref + '"' + style + '><v>' + v + '</v></c>';
+      } else {
+        xml += '<c r="' + ref + '"' + style + ' t="inlineStr"><is><t xml:space="preserve">' + xaXmlEsc(v) + '</t></is></c>';
+      }
+    }
+    xml += '</row>';
+  }
+  xml += '</sheetData>';
+
+  if (sh.merges && sh.merges.length) {
+    xml += '<mergeCells count="' + sh.merges.length + '">' +
+      sh.merges.map(function(m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>';
+  }
+
+  xml += '<pageMargins left="0.31" right="0.31" top="0.43" bottom="0.43" header="0.2" footer="0.2"/>' +
+    '<pageSetup paperSize="9" orientation="' + (sh.landscape ? 'landscape' : 'portrait') +
+    '" fitToWidth="1" fitToHeight="0" horizontalDpi="300" verticalDpi="300"/>' +
+    '</worksheet>';
+  return xml;
+}
+
+function xaSheetName(n) {
+  return String(n || 'Sheet').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31);
+}
+
+function xaBuildXlsx(sheets) {
+  var names = [], i;
+  for (i = 0; i < sheets.length; i++) names.push(xaSheetName(sheets[i].name));
+
+  var files = [];
+  var ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+  var wbSheets = '', wbRels = '';
+  for (i = 0; i < sheets.length; i++) {
+    ct += '<Override PartName="/xl/worksheets/sheet' + (i + 1) +
+      '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    wbSheets += '<sheet name="' + xaXmlEsc(names[i]) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+    wbRels += '<Relationship Id="rId' + (i + 1) +
+      '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' +
+      (i + 1) + '.xml"/>';
+  }
+  ct += '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+
+  files.push({ name: '[Content_Types].xml', data: xaUtf8(ct) });
+  files.push({ name: '_rels/.rels', data: xaUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>') });
+  files.push({ name: 'xl/workbook.xml', data: xaUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets>' + wbSheets + '</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>') });
+  files.push({ name: 'xl/_rels/workbook.xml.rels', data: xaUtf8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + wbRels +
+    '<Relationship Id="rId' + (sheets.length + 1) +
+    '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+    '</Relationships>') });
+  files.push({ name: 'xl/styles.xml', data: xaUtf8(xaStylesXml()) });
+  for (i = 0; i < sheets.length; i++) {
+    files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: xaUtf8(xaSheetXml(sheets[i])) });
+  }
+  return xaZip(files);
+}
+
+// ---------- 数值小工具 ----------
+function xaRound(v) {
+  if (v === null || v === undefined || v === '' || typeof v !== 'number' || !isFinite(v)) return '';
+  return Math.round(v * 100) / 100;
+}
+function xaInt(v) { return (v === null || v === undefined || v === '') ? '' : v; }
+function xaSheet(name, cols, rows, opt) {
+  opt = opt || {};
+  return { name: name, cols: cols, rows: rows, freeze: opt.freeze || 0, merges: opt.merges || [],
+    landscape: !!opt.landscape, rh: opt.rh || { 1: 28 } };
+}
+
+// ---------- 各工作表的构建 ----------
+function xaTeacherSheet() {
+  var d = ga(), subs = d.subjects, cls = gaClasses();
+  var cols = [11, 11], head = [{ v: '班级', s: 'h' }, { v: '班主任', s: 'h' }];
+  subs.forEach(function(s) { cols.push(11); head.push({ v: s, s: 'h' }); });
+  var rows = [head];
+  cls.forEach(function(c) {
+    var tr = d.teachers.rows[c] || {};
+    var r = [{ v: c, s: 't' }, { v: tr['班主任'] || '', s: 't' }];
+    subs.forEach(function(s) { r.push({ v: tr[s] || '', s: 't' }); });
+    rows.push(r);
+  });
+  return xaSheet('任课教师', cols, rows, { freeze: 1 });
+}
+
+function xaStuAllPass(ex, stu, subjects) {
+  for (var i = 0; i < subjects.length; i++) {
+    var v = gaNum(stu.scores ? stu.scores[subjects[i]] : null);
+    if (v === null || v < gaLine(ex, subjects[i]).pass) return 0;
+  }
+  return 1;
+}
+
+function xaRosterSheet(ex) {
+  var subs = gaSubjects(), counted = gaCountedSubjects(ex), rk = gaRankMapCached(ex);
+  var clsOrder = gaClasses(), list = (ex.students || []).slice();
+  function ord(s) { var i = clsOrder.indexOf(String(s.cls || '')); return i < 0 ? 999 : i; }
+  list.sort(function(a, b) {
+    var d = ord(a) - ord(b);
+    if (d) return d;
+    var na = String(a.no || ''), nb = String(b.no || '');
+    if (na && nb && na !== nb) return na.localeCompare(nb, 'zh');
+    return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+  });
+
+  var cols = [10, 9, 12];
+  subs.forEach(function() { cols.push(9); });
+  cols.push(9, 9, 9, 10, 20);
+
+  var head = [{ v: '姓名', s: 'h' }, { v: '班级', s: 'h' }, { v: '考试号', s: 'h' }];
+  subs.forEach(function(s) { head.push({ v: s, s: 'h' }); });
+  head.push({ v: '总分', s: 'h' }, { v: '年级排名', s: 'h' }, { v: '进步率', s: 'h' },
+    { v: '全科合格', s: 'h' }, { v: '状态', s: 'h' });
+  var rows = [head];
+
+  list.forEach(function(s) {
+    var r = gaTotalOf(s, counted), rkm = rk[gaStuKey(s)], prog = gaProgress(ex, s);
+    var row = [{ v: s.name || '', s: 't' }, { v: s.cls || '', s: 't' }, { v: s.no || '', s: 't' }];
+    subs.forEach(function(k) {
+      var v = gaNum(s.scores ? s.scores[k] : null);
+      row.push({ v: v === null ? '' : v, s: v === null ? 'off' : 'n' });
+    });
+    row.push({ v: r.absent ? '' : xaRound(r.total), s: r.absent ? 'off' : 'n' });
+    row.push({ v: rkm ? rkm.rank : '', s: 'i' });
+    row.push({ v: prog === null ? '' : Math.round(prog * 10000) / 10000, s: 'p' });
+    row.push({ v: xaStuAllPass(ex, s, counted), s: 'i' });
+    row.push({ v: r.absent ? ('缺考 ' + r.miss.join('/')) : '正常', s: r.absent ? 'off' : 't' });
+    rows.push(row);
+  });
+  return xaSheet('学生名单', cols, rows, { freeze: 1 });
+}
+
+function xaRankSheet(ex) {
+  var subs = gaSubjects(), counted = gaCountedSubjects(ex), rk = gaRankMapCached(ex);
+  var list = (ex.students || []).slice();
+  list.sort(function(a, b) {
+    var ra = rk[gaStuKey(a)], rb = rk[gaStuKey(b)];
+    var va = ra ? ra.rank : 99999, vb = rb ? rb.rank : 99999;
+    if (va !== vb) return va - vb;
+    return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+  });
+
+  var cols = [10, 9, 12];
+  subs.forEach(function() { cols.push(9); });
+  cols.push(9, 9, 9, 20);
+
+  var head = [{ v: '姓名', s: 'h' }, { v: '班级', s: 'h' }, { v: '考试号', s: 'h' }];
+  subs.forEach(function(s) { head.push({ v: s, s: 'h' }); });
+  head.push({ v: '总分', s: 'h' }, { v: '年级排名', s: 'h' }, { v: '进步率', s: 'h' }, { v: '状态', s: 'h' });
+  var rows = [head];
+
+  list.forEach(function(s) {
+    var r = gaTotalOf(s, counted), rkm = rk[gaStuKey(s)], prog = gaProgress(ex, s);
+    var row = [{ v: s.name || '', s: 't' }, { v: s.cls || '', s: 't' }, { v: s.no || '', s: 't' }];
+    subs.forEach(function(k) {
+      var v = gaNum(s.scores ? s.scores[k] : null);
+      row.push({ v: v === null ? '' : v, s: v === null ? 'off' : 'n' });
+    });
+    row.push({ v: r.absent ? '' : xaRound(r.total), s: r.absent ? 'off' : 'n' });
+    row.push({ v: rkm ? rkm.rank : '', s: 'i' });
+    row.push({ v: prog === null ? '' : Math.round(prog * 10000) / 10000, s: 'p' });
+    row.push({ v: r.absent ? ('缺考 ' + r.miss.join('/')) : '正常', s: r.absent ? 'off' : 't' });
+    rows.push(row);
+  });
+  return xaSheet('成绩排名', cols, rows, { freeze: 1 });
+}
+
+// 各科均分（含班级名次）；withDiff=true 时在下方追加「与上次考试的差值」区块
+function xaAvgSheet(ex, sheetName, withDiff) {
+  var subs = gaSubjects(), cls = gaClasses(), cmp = withDiff ? gaCompareExam(ex) : null;
+  var vals = [], totals = [];
+  cls.forEach(function(c) {
+    var row = [];
+    subs.forEach(function(s) { row.push(gaAvgOf(ex, c, s)); });
+    vals.push(row);
+    totals.push(gaTotalAvgOf(ex, c));
+  });
+  var school = [], schoolTotal = gaTotalAvgOf(ex, '');
+  subs.forEach(function(s) { school.push(gaAvgOf(ex, '', s)); });
+  var ranks = subs.map(function(_, j) {
+    return gaRankOf(vals.map(function(r) { return r[j]; }));
+  });
+  var trank = gaRankOf(totals);
+
+  var cols = [11];
+  subs.forEach(function() { cols.push(10, 9); });
+  cols.push(10);
+  subs.forEach(function() { cols.push(9); });
+  cols.push(9);
+
+  var head = [{ v: '班级', s: 'h' }];
+  subs.forEach(function(s) { head.push({ v: s, s: 'h' }, { v: s + '教师', s: 'h' }); });
+  head.push({ v: '总分', s: 'h' });
+  subs.forEach(function(s) { head.push({ v: s + '名次', s: 'h' }); });
+  head.push({ v: '总分名次', s: 'h' });
+  var rows = [head];
+
+  cls.forEach(function(c, i) {
+    var r = [{ v: c, s: 't' }];
+    subs.forEach(function(s, j) {
+      r.push({ v: xaRound(vals[i][j]), s: 'n' });
+      r.push({ v: gaTeacherName(c, s), s: 't' });
+    });
+    r.push({ v: xaRound(totals[i]), s: 'n' });
+    subs.forEach(function(s, j) { r.push({ v: xaInt(ranks[j][i]), s: 'i' }); });
+    r.push({ v: xaInt(trank[i]), s: 'i' });
+    rows.push(r);
+  });
+
+  var sr = [{ v: '全校', s: 'bt' }];
+  subs.forEach(function(s, j) { sr.push({ v: xaRound(school[j]), s: 'bn' }, { v: '', s: 'bt' }); });
+  sr.push({ v: xaRound(schoolTotal), s: 'bn' });
+  subs.forEach(function() { sr.push({ v: '', s: 'bt' }); });
+  sr.push({ v: '', s: 'bt' });
+  rows.push(sr);
+
+  if (cmp) {
+    rows.push(null);
+    var dh = [{ v: '班级', s: 'h' }];
+    subs.forEach(function(s) { dh.push({ v: s + '差值', s: 'h' }); });
+    dh.push({ v: '总分差值', s: 'h' });
+    rows.push(dh);
+    cls.forEach(function(c) {
+      var r = [{ v: c, s: 't' }];
+      subs.forEach(function(s) {
+        var a = gaAvgOf(ex, c, s), b = gaAvgOf(cmp, c, s);
+        var d = (a === null || b === null) ? null : a - b;
+        r.push({ v: xaRound(d), s: d === null ? 'n' : (d > 0 ? 'up' : (d < 0 ? 'dn' : 'n')) });
+      });
+      var ta = gaTotalAvgOf(ex, c), tb = gaTotalAvgOf(cmp, c);
+      var td = (ta === null || tb === null) ? null : ta - tb;
+      r.push({ v: xaRound(td), s: td === null ? 'n' : (td > 0 ? 'up' : (td < 0 ? 'dn' : 'n')) });
+      rows.push(r);
+    });
+  }
+  return xaSheet(sheetName || '各科均分', cols, rows, { freeze: 1 });
+}
+
+function xaRateSheet(ex, kind) {
+  var subs = gaSubjects(), cls = gaClasses();
+  var TL = gaLine(ex, GA_TOTAL), isPass = kind === 'pass';
+  var cols = [11];
+  subs.forEach(function() { cols.push(10, 10); });
+  cols.push(10);
+  if (isPass) cols.push(10);
+  cols.push(11);
+
+  var head = [{ v: '班级', s: 'h' }];
+  subs.forEach(function(s) { head.push({ v: s, s: 'h' }, { v: s + '教师', s: 'h' }); });
+  head.push({ v: '总分', s: 'h' });
+  if (isPass) head.push({ v: '全科合格率', s: 'h' });
+  head.push({ v: '班主任', s: 'h' });
+  var rows = [head];
+
+  cls.forEach(function(c) {
+    var r = [{ v: c, s: 't' }];
+    subs.forEach(function(s) {
+      var L = gaLine(ex, s);
+      var v = gaRateOf(ex, c, s, isPass ? L.pass : L.ex);
+      r.push({ v: xaRound(v), s: 'p' }, { v: gaTeacherName(c, s), s: 't' });
+    });
+    r.push({ v: xaRound(gaTotalRateOf(ex, c, isPass ? TL.pass : TL.ex)), s: 'p' });
+    if (isPass) r.push({ v: xaRound(gaAllPassRate(ex, c)), s: 'p' });
+    r.push({ v: gaTeacherName(c, '班主任'), s: 't' });
+    rows.push(r);
+  });
+
+  var sr = [{ v: isPass ? '全校合格率' : '全校优秀率', s: 'bt' }];
+  subs.forEach(function(s) {
+    var L = gaLine(ex, s);
+    sr.push({ v: xaRound(gaRateOf(ex, '', s, isPass ? L.pass : L.ex)), s: 'bp' }, { v: '', s: 'bt' });
+  });
+  sr.push({ v: xaRound(gaTotalRateOf(ex, '', isPass ? TL.pass : TL.ex)), s: 'bp' });
+  if (isPass) sr.push({ v: xaRound(gaAllPassRate(ex, '')), s: 'bp' });
+  sr.push({ v: '', s: 'bt' });
+  rows.push(sr);
+
+  return xaSheet(isPass ? '各科合格率' : '各科优秀率', cols, rows, { freeze: 1 });
+}
+
+function xaSegSheet(ex) {
+  var cls = gaClasses(), ths = gaSegThresholds().slice(0, 40);
+  var cols = [11];
+  ths.forEach(function() { cols.push(9); });
+  cols.push(10);
+
+  var head = [{ v: '班级', s: 'h' }];
+  ths.forEach(function(t) { head.push({ v: t + '分以上', s: 'h' }); });
+  head.push({ v: '班级人数', s: 'h' });
+  var rows = [head];
+
+  cls.forEach(function(c) {
+    var r = [{ v: c, s: 't' }];
+    ths.forEach(function(t) { r.push({ v: gaSegCount(ex, c, t), s: 'i' }); });
+    r.push({ v: gaClassSize(ex, c), s: 'i' });
+    rows.push(r);
+  });
+
+  var sr = [{ v: '全校', s: 'bt' }];
+  ths.forEach(function(t) { sr.push({ v: gaSegCount(ex, '', t), s: 'bi' }); });
+  sr.push({ v: gaClassSize(ex, ''), s: 'bi' });
+  rows.push(sr);
+
+  return xaSheet('分数段', cols, rows, { freeze: 1 });
+}
+
+// ---------- 导出弹窗 ----------
+function gaExportXlsxOpen() {
+  var ex = gaCurExam();
+  if (!ex) { toast('当前没有可导出的考试', 'error'); return; }
+  var cmp = gaCompareExam(ex);
+  var items = [
+    ['teachers', '任课教师', '班级、班主任、各科任课教师'],
+    ['roster', '学生名单', '姓名、班级、考试号、各科成绩、总分、年级排名、进步率、全科合格'],
+    ['avg', '各科均分', '各班各科均分 + 班级名次，下方附「与上次考试的差值」'],
+    ['rate', '各科优秀率 / 合格率', '两张表，含任课教师，末行为全校汇总'],
+    ['seg', '分数段', '总分各分数段（累计人数）'],
+    ['rank', '成绩排名', '按年级名次排序的学生明细']
+  ];
+  if (cmp) items.push(['cmp', '对比考试均分', '「' + cmp.name + '」的各班均分与名次']);
+
+  var body = '<div class="modal-header"><h3>⬇ 导出 Excel</h3>' +
+    '<button class="modal-close" onclick="closeModalForce()">×</button></div>' +
+    '<div class="modal-body">' +
+    '<p class="ga-tip" style="margin:0 0 12px">按《期末考试质量分析 2026.06》的版式生成真正的 .xlsx 文件，Excel / WPS 均可直接打开（无“格式与扩展名不符”提示）。勾选要导出的工作表：</p>' +
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:6px 14px;margin-bottom:14px">';
+  items.forEach(function(it, i) {
+    body += '<label style="display:flex;align-items:center;gap:9px;padding:7px 0;' +
+      (i ? 'border-top:1px dashed var(--border)' : '') + ';cursor:pointer">' +
+      '<input type="checkbox" data-xa="' + it[0] + '" checked style="width:16px;height:16px;flex:0 0 auto">' +
+      '<b style="font-size:13px;flex:0 0 auto">' + esc(it[1]) + '</b>' +
+      '<span style="font-size:12px;color:var(--text-l)">' + esc(it[2]) + '</span></label>';
+  });
+  body += '</div>' +
+    '<div class="form-group" style="margin-bottom:16px"><label>文件名</label>' +
+    '<input class="ga-inp" id="ga-xlsx-name" value="' +
+    esc(xaFileName(ex)) + '"></div>' +
+    '<div class="flex gap" style="justify-content:flex-end">' +
+    '<button class="btn btn-default" onclick="closeModalForce()">取消</button>' +
+    '<button class="btn btn-primary" onclick="gaExportXlsxRun()">导出 .xlsx</button>' +
+    '</div></div>';
+  openModal(body, 'lg');
+}
+
+function xaFileName(ex) {
+  var nm = String(ex && ex.name || '成绩分析').replace(/[\\\/:*?"<>|]/g, '_');
+  return '期末考试质量分析_' + nm + '_' + todayStr() + '.xlsx';
+}
+
+function gaExportXlsxRun() {
+  var ex = gaCurExam();
+  if (!ex) { toast('当前没有可导出的考试', 'error'); return; }
+  var pick = {}, any = false;
+  var boxes = document.querySelectorAll('[data-xa]');
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) { pick[boxes[i].getAttribute('data-xa')] = true; any = true; }
+  }
+  if (!any) { toast('请至少勾选一个工作表', 'error'); return; }
+
+  var sheets = [];
+  try {
+    if (pick.teachers) sheets.push(xaTeacherSheet());
+    if (pick.roster) sheets.push(xaRosterSheet(ex));
+    if (pick.avg) sheets.push(xaAvgSheet(ex, '各科均分', true));
+    if (pick.rate) { sheets.push(xaRateSheet(ex, 'ex')); sheets.push(xaRateSheet(ex, 'pass')); }
+    if (pick.seg) sheets.push(xaSegSheet(ex));
+    if (pick.rank) sheets.push(xaRankSheet(ex));
+    if (pick.cmp) {
+      var cmp = gaCompareExam(ex);
+      if (cmp) sheets.push(xaAvgSheet(cmp, '对比考试均分', false));
+    }
+    if (!sheets.length) { toast('没有可导出的数据', 'error'); return; }
+
+    var nameEl = el('ga-xlsx-name');
+    var fname = (nameEl && nameEl.value.trim()) || xaFileName(ex);
+    if (!/\.xlsx$/i.test(fname)) fname += '.xlsx';
+    fname = fname.replace(/[\\\/:*?"<>|]/g, '_');
+
+    var bin = xaBuildXlsx(sheets);
+    var blob = new Blob([bin], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); if (a.parentNode) a.parentNode.removeChild(a); }, 2000);
+
+    closeModalForce();
+    toast('已导出 ' + sheets.length + ' 个工作表：' + fname);
+  } catch (err) {
+    toast('导出失败：' + (err && err.message ? err.message : err), 'error');
+  }
+}
+
 function gsRand(seed) {
   var x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
@@ -6144,14 +7128,14 @@ function gsRand(seed) {
 function gaLoadSample() {
   var d = ga();
   if (d.exams.length && !confirm('载入示例数据会追加 2 场示例考试（不影响已有数据），继续？')) return;
-  var classes = ['01班', '02班', '03班'];
+  var classes = ['1班', '2班', '3班'];
   var names = ['朱承希', '苏芯', '蒋宗硕', '朱静怡', '余悦', '刘梦琪', '李泽瑞', '沈建军', '王雅蕊', '张锦程', '刘儒龙', '郑希'];
   var subs = GA_SUBJECTS.slice();
   d.subjects = subs.slice();
   var t = {
-    '01班': { '班主任': '华彦星', '语文': '徐建平', '数学': '华彦星', '英语': '孙洪岩', '历史': '高卫星', '道法': '徐晓煜', '物理': '柳晓华' },
-    '02班': { '班主任': '侯俊', '语文': '徐建平', '数学': '李明', '英语': '孙洪岩', '历史': '高卫星', '道法': '徐晓煜', '物理': '侯俊' },
-    '03班': { '班主任': '王春燕', '语文': '王春燕', '数学': '吕文忠', '英语': '庄晓燕', '历史': '高卫星', '道法': '徐晓煜', '物理': '柳晓华' }
+    '1班': { '班主任': '华彦星', '语文': '徐建平', '数学': '华彦星', '英语': '孙洪岩', '历史': '高卫星', '道法': '徐晓煜', '物理': '柳晓华' },
+    '2班': { '班主任': '侯俊', '语文': '徐建平', '数学': '李明', '英语': '孙洪岩', '历史': '高卫星', '道法': '徐晓煜', '物理': '侯俊' },
+    '3班': { '班主任': '王春燕', '语文': '王春燕', '数学': '吕文忠', '英语': '庄晓燕', '历史': '高卫星', '道法': '徐晓煜', '物理': '柳晓华' }
   };
   classes.forEach(function(c) {
     d.teachers.rows[c] = t[c];
@@ -6171,7 +7155,7 @@ function gaLoadSample() {
           if (ratio > 1) ratio = 1;
           scores[sub] = Math.round(full * ratio);
         });
-        if (base > 2000 && cls === '02班' && si === 2) scores['物理'] = null;   // 缺考示例
+        if (base > 2000 && cls === '2班' && si === 2) scores['物理'] = null;   // 缺考示例
         var sn = (si + 1) < 10 ? '0' + (si + 1) : String(si + 1);
         students.push({ id: sid++, name: nm, cls: cls, no: '1070' + (ci + 1) + sn, scores: scores });
       });
@@ -8190,32 +9174,99 @@ function docFileCount() {
 // ---------- IndexedDB 文件库（浏览器本地数据库） ----------
 var DOC_IDB_NAME = 'wb_workbench_files';
 var DOC_IDB_STORE = 'files';
+var DOC_IDB_TIMEOUT = 10000;     // 打开数据库超时（原 4s 偏短，磁盘繁忙/冷启动时易被误判为"不可用"）
 var _docDb = null, _docDbFail = false, _docDbOpening = null;
+var _docDbErr = null;            // 最后一次失败原因码，供状态条 / 自检面板显示
+var _docDbRaw = '';              // 最后一次失败的原始异常（name / message），供定位用
+var _docDbAutoTried = false;     // 本次停留文档中心页是否已自动重试过
+
+var DOC_IDB_CODES = { 'idb-unsupported': 1, 'idb-security': 1, 'idb-blocked': 1, 'idb-timeout': 1, 'idb-quota': 1, 'idb-open': 1, 'idb-broken': 1 };
+// 只有"环境性"故障才彻底放弃（本次会话内不再自动尝试）；超时/被占用属临时故障，允许重试
+var DOC_IDB_FATAL = { 'idb-unsupported': 1, 'idb-security': 1 };
+
+// 失败原因码 → [人话原因, 处理建议]
+function docIdbErrInfo(code) {
+  var m = {
+    'idb-unsupported': ['当前浏览器不支持本机数据库', '建议改用 Edge / Chrome 等主流浏览器打开本工作台'],
+    'idb-security':    ['当前打开方式不允许使用本机数据库', '常见原因：无痕/隐私窗口、被内嵌在预览框里打开、浏览器禁用了"网站数据"。请用浏览器直接打开这个 HTML 文件'],
+    'idb-blocked':     ['本机数据库被工作台的其他标签页占用了', '请关掉其它打开着工作台的标签页或窗口，再点「重试连接」'],
+    'idb-timeout':     ['打开本机数据库超时', '多为磁盘繁忙或空间紧张，稍后点「重试连接」通常即可恢复'],
+    'idb-quota':       ['磁盘剩余空间不足', '清理磁盘空间后点「重试连接」'],
+    'idb-open':        ['本机数据库打开失败', '先点「重试连接」；仍然失败请点「存储自检」，把结果发给维护者'],
+    'idb-broken':      ['浏览器本机存储服务异常（不是工作台的问题）', '请完全退出浏览器（任务管理器里确认没有残留进程）后重新打开本工作台；仍不行请重启电脑。恢复之前请勿清理浏览器数据，否则已存入本机数据库的文件会丢失']
+  };
+  return m[code] || m['idb-open'];
+}
+// 把 DOMException / 自定义错误归一成原因码
+function docIdbErrCode(err) {
+  var n = (err && err.name) || '', msg = (err && err.message) || '';
+  if (DOC_IDB_CODES[msg]) return msg;
+  if (n === 'SecurityError' || n === 'InvalidStateError' || n === 'NotAllowedError') return 'idb-security';
+  if (n === 'QuotaExceededError') return 'idb-quota';
+  if (/blocked|version/i.test(msg)) return 'idb-blocked';
+  return 'idb-open';
+}
+// 判定"浏览器存储服务整体异常"：连"列一下有哪些数据库"都失败时，基本可确定不是工作台自身的问题。
+// 这是区分"本工作台缺陷"与"浏览器存储服务坏了"的关键依据。
+function docIdbProbeBroken(cb) {
+  try {
+    if (!window.indexedDB || !indexedDB.databases) { cb(false); return; }
+    indexedDB.databases().then(function() { cb(false); }, function() { cb(true); });
+  } catch (e) { cb(true); }
+}
+// 把原始异常整理成一行可读文本（DOMException 的 name + message 是定位根因的关键线索）
+function docIdbRawText(err) {
+  try {
+    var nm = (err && err.name) || '', ms = (err && err.message) || '';
+    if (DOC_IDB_CODES[ms]) return ms;                       // 我们自己抛的原因码
+    if (!nm && !ms) return String(err);
+    return nm + (ms && ms !== nm ? '：' + ms : '');
+  } catch (x) { return '(无法读取错误详情)'; }
+}
 
 function docIdbOpen() {
   if (_docDb) return Promise.resolve(_docDb);
-  if (_docDbFail) return Promise.reject(new Error('idb-unavailable'));
+  if (_docDbFail) return Promise.reject(new Error(_docDbErr || 'idb-open'));
   if (_docDbOpening) return _docDbOpening;
-  _docDbOpening = new Promise(function(resolve, reject) {
+  var p = new Promise(function(resolve, reject) {
     var done = false;
     function fail(err) {
-      if (done) return; done = true; _docDbFail = true;
-      reject(err || new Error('idb-error'));
+      if (done) return; done = true;
+      var code = docIdbErrCode(err);
+      _docDbErr = code;
+      _docDbRaw = docIdbRawText(err);
+      if (DOC_IDB_FATAL[code]) _docDbFail = true;   // 临时性故障不写死，留给重试
+      reject(new Error(code));
     }
     try {
       if (!window.indexedDB) { fail(new Error('idb-unsupported')); return; }
-      var req = indexedDB.open(DOC_IDB_NAME, 1);
-      var timer = setTimeout(function() { fail(new Error('idb-timeout')); }, 4000);
+      var req;
+      try { req = indexedDB.open(DOC_IDB_NAME, 1); } catch (e) { fail(e); return; }
+      var timer = setTimeout(function() { fail(new Error('idb-timeout')); }, DOC_IDB_TIMEOUT);
       req.onupgradeneeded = function(e) {
         var idb = e.target.result;
         if (!idb.objectStoreNames.contains(DOC_IDB_STORE)) idb.createObjectStore(DOC_IDB_STORE, { keyPath: 'id' });
       };
-      req.onsuccess = function(e) { if (done) return; done = true; clearTimeout(timer); _docDb = e.target.result; resolve(_docDb); };
+      req.onsuccess = function(e) {
+        if (done) return; done = true; clearTimeout(timer);
+        _docDb = e.target.result; _docDbErr = null;
+        // 其他标签页要升级版本时主动让路，避免自己反过来变成"占用者"
+        try { _docDb.onversionchange = function() { try { _docDb.close(); } catch (x) {} _docDb = null; }; } catch (x) {}
+        resolve(_docDb);
+      };
       req.onerror = function() { clearTimeout(timer); fail(req.error); };
       req.onblocked = function() { clearTimeout(timer); fail(new Error('idb-blocked')); };
     } catch (err) { fail(err); }
   });
-  return _docDbOpening;
+  _docDbOpening = p;
+  // 失败后必须清掉缓存，否则被缓存的 rejected Promise 会让后续重试永远拿不到新连接
+  p.then(null, function() { if (_docDbOpening === p) _docDbOpening = null; });
+  return p;
+}
+// 重试：清掉失败标记与缓存后重新打开
+function docIdbRetry() {
+  _docDbFail = false; _docDbErr = null; _docDbOpening = null;
+  return docIdbOpen();
 }
 
 function docIdbTx(mode, fn) {
@@ -8299,29 +9350,49 @@ var MEDIA_IDB_STORE = 'imgs';
 var MEDIA_MAX_IMG = 9;    // 家校沟通：单条最多 9 张
 var MEDIA_MAX_ATT = 10;   // 待办：单条最多 10 个附件
 var MD_PH = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-var _mdDb = null, _mdDbFail = false, _mdDbOpening = null, _mdUrlCache = {};
+var _mdDb = null, _mdDbFail = false, _mdDbOpening = null, _mdUrlCache = {}, _mdDbErr = null, _mdDbRaw = '';
 
 function mdIdbOpen() {
   if (_mdDb) return Promise.resolve(_mdDb);
-  if (_mdDbFail) return Promise.reject(new Error('mdb-unavailable'));
+  if (_mdDbFail) return Promise.reject(new Error(_mdDbErr || 'idb-open'));
   if (_mdDbOpening) return _mdDbOpening;
-  _mdDbOpening = new Promise(function(resolve, reject) {
+  var p = new Promise(function(resolve, reject) {
     var done = false;
-    function fail(err) { if (done) return; done = true; _mdDbFail = true; reject(err || new Error('mdb-error')); }
+    function fail(err) {
+      if (done) return; done = true;
+      var code = docIdbErrCode(err);
+      _mdDbErr = code;
+      _mdDbRaw = docIdbRawText(err);
+      if (DOC_IDB_FATAL[code]) _mdDbFail = true;
+      reject(new Error(code));
+    }
     try {
       if (!window.indexedDB) { fail(new Error('idb-unsupported')); return; }
-      var req = indexedDB.open(MEDIA_IDB_NAME, 1);
-      var timer = setTimeout(function() { fail(new Error('idb-timeout')); }, 4000);
+      var req;
+      try { req = indexedDB.open(MEDIA_IDB_NAME, 1); } catch (e) { fail(e); return; }
+      var timer = setTimeout(function() { fail(new Error('idb-timeout')); }, DOC_IDB_TIMEOUT);
       req.onupgradeneeded = function(e) {
         var idb = e.target.result;
         if (!idb.objectStoreNames.contains(MEDIA_IDB_STORE)) idb.createObjectStore(MEDIA_IDB_STORE, { keyPath: 'id' });
       };
-      req.onsuccess = function(e) { if (done) return; done = true; clearTimeout(timer); _mdDb = e.target.result; resolve(_mdDb); };
+      req.onsuccess = function(e) {
+        if (done) return; done = true; clearTimeout(timer);
+        _mdDb = e.target.result; _mdDbErr = null;
+        try { _mdDb.onversionchange = function() { try { _mdDb.close(); } catch (x) {} _mdDb = null; }; } catch (x) {}
+        resolve(_mdDb);
+      };
       req.onerror = function() { clearTimeout(timer); fail(req.error); };
       req.onblocked = function() { clearTimeout(timer); fail(new Error('idb-blocked')); };
     } catch (err) { fail(err); }
   });
-  return _mdDbOpening;
+  _mdDbOpening = p;
+  p.then(null, function() { if (_mdDbOpening === p) _mdDbOpening = null; });
+  return p;
+}
+// 重试：清掉失败标记与缓存后重新打开图片库
+function mdIdbRetry() {
+  _mdDbFail = false; _mdDbErr = null; _mdDbOpening = null;
+  return mdIdbOpen();
 }
 function mdTx(mode, fn) {
   return mdIdbOpen().then(function(idb) {
@@ -8644,7 +9715,7 @@ renderers.docs = function() {
     '<button class="btn btn-default" onclick="showRenameCatForm()">✎ 分类改名</button>' +
     '<button class="btn btn-danger" onclick="deleteCurrentCat()">🗑 删除分类</button>' +
     '<input type="file" id="doc-file-input" accept="' + DOC_ACCEPT + '" style="display:none" onchange="onDocFilePicked()"></div>';
-  html += '<p class="muted" style="font-size:11px;margin:0 0 6px">支持 .doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt，单文件最大 <b>' + fmtBytes(DOC_MAX_FILE) + '</b>。文件保存在<b>本机浏览器的文件库</b>（独立存储，容量随磁盘空间自动分配），随时点「⬇ 下载」即可取回。</p>';
+  html += '<p class="muted" style="font-size:11px;margin:0 0 6px">支持 .doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf/.txt，单文件最大 <b>' + fmtBytes(DOC_MAX_FILE) + '</b>。文件保存在<b>本机浏览器的文件库</b>（独立存储，容量随磁盘空间动态分配），随时点「⬇ 下载」即可取回。若下方状态条提示数据库不可用，点「重试连接」即可自愈；仍不行请点「存储自检」查看具体原因。</p>';
   html += '<div class="doc-store" id="doc-store-info">文件库：正在读取存储状态…</div>';
   if (items.length) {
     items.slice().sort(function(a, b) { return String(a.created).localeCompare(String(b.created)) * -1; }).forEach(function(d) {
@@ -8772,8 +9843,9 @@ function onDocFilePicked() {
 
 // 兼容模式回退：base64 存入浏览器本地存储（受单文件与合计上限约束）
 function storeDocFileFallback(f, c, ext, id) {
+  var _why = docIdbErrInfo(docIdbErrCode(new Error(_docDbErr || 'idb-open')))[0];
   if (f.size > DOC_MAX_FILE_FALLBACK) {
-    toast('本机数据库不可用，已切换兼容模式：该模式下单个文件不能超过 ' + fmtBytes(DOC_MAX_FILE_FALLBACK), 'error');
+    toast('本机数据库暂不可用（' + _why + '），已切到兼容模式：该模式下单个文件不能超过 ' + fmtBytes(DOC_MAX_FILE_FALLBACK) + '。可回文档中心点「重试连接」后再传', 'error');
     return;
   }
   if (docStoredBytes() + f.size > DOC_TOTAL_LIMIT) {
@@ -8820,26 +9892,147 @@ function downloadDocFile(id) {
 }
 
 // 文件库状态条：显示已用容量与可用配额，并提供持久化申请
+function docStoreBtn(label, call, danger) {
+  return '<button class="btn ' + (danger ? 'btn-danger' : 'btn-default') + ' btn-sm" style="margin-left:8px;padding:2px 8px;font-size:11px" onclick="' + call + '">' + label + '</button>';
+}
 function refreshDocStoreInfo() {
   var box = el('doc-store-info');
   if (!box) return;
   docIdbOpen().then(function() {
+    var tail = docStoreBtn('申请持久保存', 'requestDocPersist()') + docStoreBtn('存储自检', 'showDocStoreDiag()');
     if (!navigator.storage || !navigator.storage.estimate) {
-      box.innerHTML = '📦 文件库：本机浏览器数据库 · 已存 ' + docFileCount() + ' 个文件（' + fmtBytes(docIdbBytes()) + '） · 容量随磁盘空间动态分配';
+      box.innerHTML = '📦 文件库：本机浏览器数据库 · 已存 ' + docFileCount() + ' 个文件（' + fmtBytes(docIdbBytes()) + '） · 容量随磁盘空间动态分配' + tail;
       return;
     }
     return navigator.storage.estimate().then(function(est) {
       var used = (est && est.usage) || 0, quota = (est && est.quota) || 0;
-      var pct = quota ? Math.min(100, Math.round(used / quota * 100)) : 0;
       box.innerHTML = '📦 文件库：本机浏览器数据库 · 已存 <b>' + docFileCount() + '</b> 个文件（' + fmtBytes(docIdbBytes()) + '） · 本页已用 <b>' +
-        fmtBytes(used) + '</b> / 可用约 <b>' + fmtBytes(quota) + '</b>' +
-        '<button class="btn btn-default btn-sm" style="margin-left:8px;padding:2px 8px;font-size:11px" onclick="requestDocPersist()">申请持久保存</button>';
+        fmtBytes(used) + '</b> / 可用约 <b>' + fmtBytes(quota) + '</b>' + tail;
     });
-  }).catch(function() {
-    box.innerHTML = '⚠️ 本机数据库不可用，已回退兼容模式 · 已用 ' + fmtBytes(docStoredBytes()) + ' / 上限 ' + fmtBytes(DOC_TOTAL_LIMIT) + '（建议清理旧文件）';
+  }).catch(function(err) {
+    var code = docIdbErrCode(err);
+    if (_docDbErr && DOC_IDB_CODES[_docDbErr]) code = _docDbErr;   // 归一化时可能已被升级为更准确的原因码
+    var info = docIdbErrInfo(code);
+    var localN = (DATA.docs.items || []).filter(function(x) { return x.kind === 'file' && x.fileData; }).length;
+    box.innerHTML = '⚠️ <b>' + info[0] + '</b>（原因码 ' + code + '）· 已暂用兼容模式：文件改存本地存储，单文件上限 ' +
+      fmtBytes(DOC_MAX_FILE_FALLBACK) + '、合计上限 ' + fmtBytes(DOC_TOTAL_LIMIT) +
+      '（当前 ' + localN + ' 个文件 / ' + fmtBytes(docStoredBytes()) + '）' +
+      docStoreBtn('重试连接', 'retryDocStore()', true) + docStoreBtn('存储自检', 'showDocStoreDiag()') +
+      (_docDbRaw ? '<br><span class="muted" style="font-size:11px">底层错误：' + esc(_docDbRaw) + '</span>' : '') +
+      '<br><span class="muted">处理建议：' + esc(info[1]) + '</span>';
+    // 临时性故障（超时 / 被占用 / 打开失败）自动重试一次，多数情况自己就恢复了
+    var tmp = (code === 'idb-timeout' || code === 'idb-blocked' || code === 'idb-open');
+    if (tmp && !_docDbAutoTried) {
+      _docDbAutoTried = true;
+      setTimeout(function() { if (currentPage === 'docs') retryDocStore(true); }, 1500);
+    }
   });
 }
-afterRender.docs = function() { refreshDocStoreInfo(); };
+afterRender.docs = function() { _docDbAutoTried = false; refreshDocStoreInfo(); };
+
+// 重试连接本机数据库（silent=true 时不弹提示，用于自动重试）
+function retryDocStore(silent) {
+  if (!silent) toast('正在重新连接本机数据库…');
+  docIdbRetry().then(function() {
+    return mdIdbRetry().catch(function() {});
+  }).then(function() {
+    toast('已连上本机数据库，文件可正常存入');
+    refreshDocStoreInfo();
+  }).catch(function(err) {
+    var code = docIdbErrCode(err);
+    // 再探一次"数据库枚举"：若连它也失败，说明是浏览器存储服务整体异常，而非本工作台的缺陷
+    docIdbProbeBroken(function(broken) {
+      if (broken) _docDbErr = 'idb-broken';
+      var info = docIdbErrInfo(_docDbErr || code);
+      if (!silent) toast(info[0] + ' · ' + info[1], 'error');
+      refreshDocStoreInfo();
+    });
+  });
+}
+
+// 存储自检面板：把"本机数据库不可用"相关的环境信息一次列全，便于定位原因
+function showDocStoreDiag() {
+  openModal('<h3 style="margin:0 0 4px">🔍 本机存储自检</h3>' +
+    '<p class="muted" style="font-size:12px;margin:0 0 10px">用于排查「本机数据库不可用」。把这一屏截图发给维护者即可。</p>' +
+    '<div id="diag-body" style="font-size:13px;max-height:56vh;overflow:auto">正在检测…</div>' +
+    '<div style="margin-top:14px;text-align:right"><button class="btn btn-primary" onclick="closeModalForce()">关闭</button></div>', 'lg');
+  var out = [];
+  function line(k, v) { out.push('<tr><td style="padding:3px 12px 3px 0;white-space:nowrap;color:#888;vertical-align:top">' + k + '</td><td style="padding:3px 0;word-break:break-all">' + v + '</td></tr>'); }
+  function paint(list) { var b = el('diag-body'); if (b) b.innerHTML = '<table style="width:100%;border-collapse:collapse">' + list.join('') + '</table>'; }
+
+  var embedded = false;
+  try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
+  line('打开协议', esc(location.protocol));
+  line('页面来源 origin', esc(location.origin || '（空 origin，多出现在被内嵌或特殊协议下）'));
+  line('完整地址', '<span style="font-size:11px">' + esc(location.href) + '</span>');
+  line('是否被内嵌', embedded ? '<b style="color:#c00">是</b>（预览框 / iframe 里通常禁用本机数据库）' : '否');
+  line('IndexedDB 接口', window.indexedDB ? '✅ 存在' : '❌ 不存在');
+  line('storage.estimate', (navigator.storage && navigator.storage.estimate) ? '✅ 支持' : '❌ 不支持');
+  line('文件库本次状态', _docDb ? '✅ 已连接' : ('未连接' + (_docDbErr ? '（上次失败：' + esc(_docDbErr) + '）' : '')));
+  line('图片库本次状态', _mdDb ? '✅ 已连接' : ('未连接' + (_mdDbErr ? '（上次失败：' + esc(_mdDbErr) + '）' : '')));
+  line('浏览器', '<span style="font-size:11px">' + esc(navigator.userAgent) + '</span>');
+  try {
+    var t = 0;
+    for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); t += k.length + String(localStorage.getItem(k) || '').length; }
+    line('localStorage 用量', fmtBytes(t * 2));
+  } catch (e) { line('localStorage 用量', '读取失败：' + esc(e.name)); }
+  var localFiles = (DATA.docs.items || []).filter(function(x) { return x.kind === 'file' && x.fileData; }).length;
+  var idbFiles = (DATA.docs.items || []).filter(function(x) { return x.kind === 'file' && !x.fileData; }).length;
+  line('文档：兼容模式文件', localFiles + ' 个（base64 存在本地存储）');
+  line('文档：文件库文件', idbFiles + ' 个（存在本机数据库）');
+  paint(out);
+
+  // 异步补充：数据库清单 → 配额 → 两个库的直连测试
+  var extra = [];
+  function line2(k, v) { extra.push('<tr><td style="padding:3px 12px 3px 0;white-space:nowrap;color:#888;vertical-align:top">' + k + '</td><td style="padding:3px 0;word-break:break-all">' + v + '</td></tr>'); }
+  var dbListErr = false, estErr = false, fileOk = false, mdOk = false;
+  var p = Promise.resolve();
+  if (window.indexedDB && indexedDB.databases) {
+    p = p.then(function() {
+      return indexedDB.databases().then(function(list) {
+        line2('已有数据库清单', (list && list.length) ? list.map(function(d) { return esc(d.name) + ' v' + d.version; }).join('<br>') : '（空）');
+      }).catch(function(e) { dbListErr = true; line2('已有数据库清单', '枚举失败：' + esc(e.name) + (e.message ? '（' + esc(e.message) + '）' : '')); });
+    });
+  } else {
+    line2('已有数据库清单', '（浏览器不支持枚举）');
+  }
+  p.then(function() {
+    if (!navigator.storage || !navigator.storage.estimate) { line2('已用 / 配额', '（不支持估算）'); return; }
+    return navigator.storage.estimate().then(function(est) {
+      line2('已用 / 配额', fmtBytes((est && est.usage) || 0) + ' / ' + fmtBytes((est && est.quota) || 0));
+    }).catch(function(e) { estErr = true; line2('已用 / 配额', '读取失败：' + esc(e.name) + (e.message ? '（' + esc(e.message) + '）' : '')); });
+  }).then(function() {
+    return docIdbRetry().then(function() { fileOk = true; line2('文件库直连测试', '✅ 成功'); },
+      function(err) {
+        var c = docIdbErrCode(err);
+        line2('文件库直连测试', '❌ 失败：' + esc(c) + '（' + esc(docIdbErrInfo(c)[0]) + '）');
+        line2('文件库失败详情', '<span style="font-size:11px">' + esc(_docDbRaw || '(无)') + '</span>');
+      });
+  }).then(function() {
+    return mdIdbRetry().then(function() { mdOk = true; line2('图片库直连测试', '✅ 成功'); },
+      function(err) {
+        line2('图片库直连测试', '❌ 失败：' + esc(docIdbErrCode(err)));
+        line2('图片库失败详情', '<span style="font-size:11px">' + esc(_mdDbRaw || '(无)') + '</span>');
+      });
+  }).then(function() {
+    var b = el('diag-body');
+    if (!b) return;
+    var hint;
+    if (fileOk && mdOk) {
+      hint = '提示：两项「直连测试」均为 ✅，说明数据库本身可用，点上方的「重试连接」即可恢复正常。';
+    } else if (!fileOk && !mdOk && dbListErr) {
+      hint = '⚠️ 判定：数据库打开、数据库枚举' + (estErr ? '、容量估算' : '') +
+        '同时失败，而本页本地存储（localStorage）正常 —— 这是<b>浏览器自身的存储服务异常</b>，不是工作台的问题。' +
+        '<b>请完全退出该浏览器</b>（在任务管理器里确认没有残留进程）后重新打开本工作台；仍然不行请重启电脑。' +
+        '<br>在恢复正常并确认文件已导出之前，<b>不要清理浏览器数据</b>，否则已存入本机数据库的文件会一起丢失。';
+    } else {
+      hint = '提示：先点上方「重试连接」；若提示"被占用"，请关掉其它打开着工作台的标签页；仍不行的把这一屏发给维护者。';
+    }
+    b.innerHTML = '<table style="width:100%;border-collapse:collapse">' + out.join('') + extra.join('') + '</table>' +
+      '<p class="muted" style="font-size:12px;margin:12px 0 0">' + hint + '</p>';
+    if (currentPage === 'docs') refreshDocStoreInfo();
+  });
+}
 
 function requestDocPersist() {
   if (!navigator.storage || !navigator.storage.persist) { toast('当前浏览器不支持持久化申请', 'error'); return; }
