@@ -737,6 +737,48 @@ details.fhelp summary { cursor: pointer; color: var(--primary); font-weight: 600
 .ga-subpick input { margin: 0; }
 .ga-offtag { display: inline-block; font-size: 10px; font-weight: 400; color: var(--text-l); background: #f3f4f6; border-radius: 4px; padding: 1px 4px; margin-left: 3px; vertical-align: 1px; }
 .ga-tbl th.ga-offcol { color: var(--text-l); background: #fcfcfd; }
+/* 成绩名单：单击科目列头排序 */
+.ga-tbl th.ga-sortable { cursor: pointer; user-select: none; }
+.ga-tbl th.ga-sortable:hover { background: var(--primary-light); color: var(--primary-dark); }
+.ga-tbl th.ga-sorted { background: var(--primary-light); color: var(--primary-dark); }
+.ga-sortico { display: inline-block; margin-left: 3px; font-size: 10px; opacity: .45; }
+.ga-tbl th.ga-sorted .ga-sortico { opacity: 1; }
+.ga-sortbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 6px 10px; font-size: 12px; color: var(--primary-dark); background: var(--primary-light); border: 1px solid #bfdbfe; border-radius: 8px; }
+.ga-sortbar button { margin-left: auto; border: 1px solid #93c5fd; background: #fff; color: var(--primary-dark); font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; font-family: inherit; }
+.ga-sortbar button:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+/* 按科目删除单场考试成绩 */
+.ga-subdel { display: flex; flex-wrap: wrap; gap: 8px; }
+.ga-subdelitem { display: flex; align-items: center; gap: 7px; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px 5px 10px; font-size: 12px; }
+.ga-subdelitem .ga-cnt { color: var(--text-l); font-size: 11px; }
+.ga-subdelitem button { border: 1px solid #fecaca; background: #fff; color: var(--danger); border-radius: 6px; padding: 3px 9px; font-size: 11px; cursor: pointer; font-family: inherit; }
+.ga-subdelitem button:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.ga-subdelitem button:disabled { background: #f3f4f6; border-color: var(--border); color: #9ca3af; cursor: not-allowed; }
+/* 教务系统 · 年级选择与切换 */
+.jw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+.jw-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 15px; background: #fff; cursor: pointer; transition: .15s; display: flex; flex-direction: column; gap: 7px; min-height: 120px; }
+.jw-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.jw-head { display: flex; align-items: center; gap: 8px; }
+.jw-name { font-size: 17px; font-weight: 700; }
+.jw-go { margin-left: auto; font-size: 12px; color: var(--primary); font-weight: 600; }
+.jw-meta { font-size: 12px; color: var(--text-l); }
+.jw-last { font-size: 12px; color: var(--text-l); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-acts { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px dashed var(--border); padding-top: 8px; margin-top: auto; }
+.jw-acts button { border: 1px solid var(--border); background: #fff; color: var(--text-l); font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer; font-family: inherit; }
+.jw-acts button:hover { border-color: var(--primary); color: var(--primary); }
+.jw-acts button.jw-danger:hover { border-color: var(--danger); color: var(--danger); }
+.jw-add { border: 1px dashed var(--border); border-radius: 12px; background: #fafafa; color: var(--text-l); cursor: pointer; min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-family: inherit; font-size: 13px; }
+.jw-add span { font-size: 22px; line-height: 1; }
+.jw-add:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+.jw-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; }
+.jw-tag { font-size: 11px; color: var(--primary-dark); background: var(--primary-light); border-radius: 999px; padding: 2px 8px; }
+.jw-curname { font-size: 15px; }
+.jw-barmeta { font-size: 12px; color: var(--text-l); }
+@media (max-width: 768px) {
+  .jw-grid { gap: 10px; }
+  .jw-card { padding: 12px; min-height: 104px; }
+  .jw-add { min-height: 104px; }
+  .jw-bar { padding: 8px 10px; }
+}
 @media (max-width: 768px) {
   .ga-tbl th, .ga-tbl td { padding: 6px 7px; font-size: 12px; }
   .ga-tbl .ga-inp { min-width: 62px; }
@@ -919,7 +961,7 @@ const NAV_ITEMS = [
   ['teaching', '🎓 教学教研'],
   ['students', '👥 学生信息'],
   ['grades', '📊 成绩管理'],
-  ['gradeanalysis', '📈 年级成绩分析'],
+  ['gradeanalysis', '📈 教务系统'],
   ['career', '🎯 生涯规划'],
   ['communication', '📞 家校沟通'],
   ['talks', '💬 谈心谈话'],
@@ -1727,7 +1769,7 @@ function generateInitialData() {
     recitation: recitation,
     teaching: teaching,
     docs: docs,
-    grade: gaDefault(),
+    jw: jwDefaultStore(),
     tips: tips,
     ai: { base: 'https://api.deepseek.com', model: 'deepseek-chat' }
   };
@@ -1753,6 +1795,7 @@ var needRestoreBanner = false;  // 检测到存档丢失 → 首页提示条
 var lastSnapTs = 0;
 
 function save() {
+  try { jwEnsure(); } catch (e) {}   // 保证多年级存档结构完整（幂等）
   localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
   afterSaveAutoBackup();
   wbCloudSchedulePush();   // 云端可用时异步同步（不可用则自动跳过）
@@ -1906,7 +1949,7 @@ function loadData() {
       if (!DATA.teaching) DATA.teaching = f.teaching;
       if (!DATA.docs) DATA.docs = f.docs;
       migrateDocsData(); // 文档中心旧版数据({items,currentCategory})自动升级为“分类+文档”新结构
-      if (!DATA.grade) DATA.grade = gaDefault(); // 年级成绩分析：旧数据自动补齐
+      jwEnsure();  // 教务系统：旧版单年级数据自动升级为多年级存档（幂等）
       migrateGaClasses();                        // 班级名统一为「N班」（幂等，只改内存）
       if (!DATA.tips) DATA.tips = f.tips;
       if (!DATA.ai) DATA.ai = f.ai;
@@ -2305,6 +2348,7 @@ function buildNav() {
 }
 
 function navigate(page) {
+  if (page === 'gradeanalysis') gaGate = true;   // 教务系统：每次进入先选年级
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(function(n) {
     n.classList.toggle('active', n.dataset.page === page);
@@ -2428,7 +2472,7 @@ renderers.home = function() {
     '<button class="quick-btn" onclick="navigate(\'talks\')"><span class="icon">💬</span>添加谈话</button>' +
     '<button class="quick-btn" onclick="navigate(\'bonus\')"><span class="icon">⭐</span>加减分</button>' +
     '<button class="quick-btn" onclick="hwSubTab=\'rec\';navigate(\'homework\')"><span class="icon">📖</span>读背过关</button>' +
-    '<button class="quick-btn" onclick="navigate(\'gradeanalysis\')"><span class="icon">📈</span>年级成绩分析</button>' +
+    '<button class="quick-btn" onclick="navigate(\'gradeanalysis\')"><span class="icon">📈</span>教务系统</button>' +
     '</div></div>';
 
   html += '<div class="card"><div class="card-title">🏆 积分排行榜 TOP10</div><table><thead><tr><th>排名</th><th>姓名</th><th>净积分</th><th>进度</th></tr></thead><tbody>' +
@@ -4797,9 +4841,122 @@ var gaTab = 'avg';
 var _gaRankCache = {};
 var _gaRosterKw = '';
 var _gaRosterCls = '';
+// 成绩名单排序：dir 0=按年级名次（默认） 1=该科从高到低 2=该科从低到高
+var _gaRosterSort = { key: '', dir: 0 };
 var _gaSegCfg = { start: 520, step: 10, count: 20 };
 var _gaImp = { buffer: null, sheets: null, rows: null, head: null, map: null, hi: null };
 var _gaT = { rows: null, head: null, cm: null };
+var gaGate = false;  // true = 显示「选择年级」入口页（由 navigate 进入模块时置 true）
+var _jwMigrated = false;   // 本次会话是否由旧版单年级数据升级而来
+
+// ---------- 多年级存档（教务系统） ----------
+// 结构：DATA.jw = { v:1, cur:'g3', grades:[{ id, name, data }] }
+// 每个年级的 data 与原「年级成绩分析」结构完全一致（subjects/teachers/exams/curId/linePreset）。
+// DATA.grade 是指向「当前年级 data」的访问器（不可枚举、不参与 JSON 序列化），
+// 因此原有全部成绩分析函数一行都不用改，就天然按年级隔离。
+var JW_DEFAULT_GRADES = ['初一', '初二', '初三'];
+
+function jwDefaultStore() {
+  var list = JW_DEFAULT_GRADES.map(function(n, i) {
+    return { id: 'g' + (i + 1), name: n, data: gaDefault() };
+  });
+  return { v: 1, cur: list[0].id, grades: list };
+}
+
+function jwFind(id) {
+  var jw = DATA && DATA.jw;
+  if (!jw || !Array.isArray(jw.grades)) return null;
+  for (var i = 0; i < jw.grades.length; i++) {
+    if (jw.grades[i] && jw.grades[i].id === id) return jw.grades[i];
+  }
+  return null;
+}
+
+// 幂等：旧版单年级数据自动升级为多年级存档；已升级则立即返回
+function jwEnsure() {
+  if (!DATA || typeof DATA !== 'object') return null;
+  var desc = Object.getOwnPropertyDescriptor(DATA, 'grade');
+  var bound = !!(desc && typeof desc.get === 'function');
+  var ok = !!(DATA.jw && typeof DATA.jw === 'object' && Array.isArray(DATA.jw.grades) && DATA.jw.grades.length);
+  if (bound && ok) return DATA.jw;
+
+  // 仅在从未有过多年级结构时，才把旧 grade 当作真实数据迁移（避免旧版回写覆盖）
+  var legacy = null;
+  if (!ok && !bound && desc && 'value' in desc && desc.value &&
+      typeof desc.value === 'object' && !Array.isArray(desc.value)) {
+    legacy = desc.value;
+  }
+  if (!ok) {
+    var store = jwDefaultStore();
+    if (legacy) {   // 原有数据归入最后一个默认年级（初三），其余年级为空档
+      var last = store.grades[store.grades.length - 1];
+      last.data = legacy;
+      store.cur = last.id;
+      _jwMigrated = true;
+    }
+    DATA.jw = store;
+  }
+
+  // 节点自检
+  var gs = DATA.jw.grades;
+  for (var i = gs.length - 1; i >= 0; i--) {
+    var g = gs[i];
+    if (!g || typeof g !== 'object' || !g.id) { gs.splice(i, 1); continue; }
+    if (!g.name) g.name = '年级' + (i + 1);
+    if (!g.data || typeof g.data !== 'object' || Array.isArray(g.data)) g.data = gaDefault();
+  }
+  if (!gs.length) DATA.jw = jwDefaultStore();
+  if (!jwFind(DATA.jw.cur)) DATA.jw.cur = DATA.jw.grades[0].id;
+
+  if (legacy) { try { delete DATA.grade; } catch (e) {} }
+  Object.defineProperty(DATA, 'grade', {
+    configurable: true,
+    enumerable: false,
+    get: function() {
+      var j = DATA.jw;
+      var gg = jwFind(j.cur);
+      if (!gg) { gg = j.grades[0]; j.cur = gg.id; }
+      if (!gg.data || typeof gg.data !== 'object') gg.data = gaDefault();
+      return gg.data;
+    },
+    set: function(v) {
+      var j = DATA.jw;
+      var gg = jwFind(j.cur) || j.grades[0];
+      if (gg) gg.data = v;
+    }
+  });
+  return DATA.jw;
+}
+
+function jwActive() {
+  jwEnsure();
+  var jw = DATA && DATA.jw;
+  if (!jw || !Array.isArray(jw.grades) || !jw.grades.length) return null;
+  var g = jwFind(jw.cur);
+  if (!g) { g = jw.grades[0]; jw.cur = g.id; }
+  return g;
+}
+
+function jwActiveName() { var g = jwActive(); return g ? g.name : ''; }
+
+function jwSetCur(id) {
+  jwEnsure();
+  if (!jwFind(id)) return false;
+  DATA.jw.cur = id;
+  return true;
+}
+
+// 年级规模统计（用于入口卡片）
+function jwStatOf(g) {
+  var d = (g && g.data) || {};
+  var exams = Array.isArray(d.exams) ? d.exams : [];
+  var last = exams.length ? exams[exams.length - 1] : null;
+  var classes = (d.teachers && Array.isArray(d.teachers.classes)) ? d.teachers.classes.slice() : [];
+  if (!classes.length && last && Array.isArray(last.students)) {
+    last.students.forEach(function(s) { if (s && s.cls && classes.indexOf(s.cls) < 0) classes.push(s.cls); });
+  }
+  return { exams: exams.length, classes: classes.length, last: last, stu: last ? (last.students || []).length : 0 };
+}
 
 // ---------- 数据层 ----------
 function gaDefault() {
@@ -4807,7 +4964,8 @@ function gaDefault() {
     subjects: GA_SUBJECTS.slice(),
     teachers: { classes: [], rows: {} },
     exams: [],
-    curId: null
+    curId: null,
+    linePreset: {}
   };
 }
 
@@ -4819,6 +4977,7 @@ function ga() {
   if (!d.teachers.classes) d.teachers.classes = [];
   if (!d.teachers.rows) d.teachers.rows = {};
   if (!d.exams) d.exams = [];
+  if (!d.linePreset || typeof d.linePreset !== 'object') d.linePreset = {};
   if (d.curId == null && d.exams.length) d.curId = d.exams[d.exams.length - 1].id;
   return d;
 }
@@ -4991,11 +5150,36 @@ function gaMatchStudent(idx, nm, cls, no) {
   return null;
 }
 
+// 单科默认分数线：优先用「已保存的标准」（DATA.grade.linePreset），
+// 其次用内置预设 GA_LINE_PRESET；都没有则按 满分×70% / 满分×50% 估一个。
+function gaLinePresetOf(subj) {
+  var saved = ga().linePreset;
+  if (saved && saved[subj] && typeof saved[subj] === 'object') {
+    return { ex: Number(saved[subj].ex) || 0, pass: Number(saved[subj].pass) || 0 };
+  }
+  if (GA_LINE_PRESET[subj]) return { ex: GA_LINE_PRESET[subj].ex, pass: GA_LINE_PRESET[subj].pass };
+  var full = GA_FULL[subj] || 100;
+  return { ex: Math.round(full * 0.7), pass: Math.round(full * 0.5) };
+}
+
+// 总分分数线 = 计入总分的各科分数线之和（自动，不单独存值）。
+// 未计入总分的科目（如初二取消勾选的化学）不参与累加，与总分统计口径保持一致。
+function gaTotalLine(exam) {
+  var out = { ex: 0, pass: 0, auto: true };
+  gaCountedSubjects(exam).forEach(function(s) {
+    var L = gaLine(exam, s);
+    out.ex += Number(L.ex) || 0;
+    out.pass += Number(L.pass) || 0;
+  });
+  return out;
+}
+
 // 单科分数线（惰性补齐预设）
 function gaLine(exam, subj) {
+  if (subj === GA_TOTAL) return gaTotalLine(exam);
   if (!exam.lines) exam.lines = {};
   if (!exam.lines[subj] || typeof exam.lines[subj] !== 'object') {
-    var p = GA_LINE_PRESET[subj] || { ex: 85, pass: 60 };
+    var p = gaLinePresetOf(subj);
     exam.lines[subj] = { ex: p.ex, pass: p.pass };
   }
   return exam.lines[subj];
@@ -5168,10 +5352,11 @@ function gaRankOf(vals) {
 
 // ---------- 主渲染 ----------
 renderers.gradeanalysis = function() {
+  if (gaGate) return gaGradePickHTML();           // 先选年级
   var ex = gaCurExam();
   var tabs = [['avg', '📊 均分与排名'], ['diff', '🔀 考试对比'], ['rate', '🎯 优秀率/合格率'], ['seg', '📶 分数段统计'],
     ['roster', '👥 成绩名单'], ['teachers', '👩‍🏫 任课教师'], ['data', '📥 数据导入']];
-  var html = '<h2 class="page-title">📈 年级成绩分析</h2>' +
+  var html = '<h2 class="page-title">📈 教务系统</h2>' + gaGradeBar() +
     '<div class="tabs">' + tabs.map(function(t) {
       return '<div class="tab ' + (gaTab === t[0] ? 'active' : '') + '" onclick="gaGo(\'' + t[0] + '\')">' + t[1] + '</div>';
     }).join('') + '</div>';
@@ -5194,6 +5379,153 @@ renderers.gradeanalysis = function() {
   else { html += gaSubjCountHTML(ex); html += gaAvgHTML(ex); }
   return html;
 };
+
+// ---------- 教务系统：年级入口 / 切换 ----------
+function gaGradePickHTML() {
+  var jw = jwEnsure() || { grades: [] };
+  var gs = jw.grades || [];
+  var html = '<h2 class="page-title">📈 教务系统</h2>' +
+    '<div class="card"><div class="card-title">🏫 请选择年级</div>' +
+    '<p class="ga-tip" style="margin:0 0 2px">每个年级的任课教师与考试成绩<b>单独存档、互不影响</b>。进入后可照常使用均分与排名、考试对比、优秀率/合格率、分数段、成绩名单、任课教师、数据导入与 Excel 导出。</p>' +
+    '<div class="jw-grid">' + gs.map(gaGradeCardHTML).join('') +
+    '<button class="jw-add" onclick="jwAddGrade()"><span>+</span>新增年级</button>' +
+    '</div></div>' +
+    (_jwMigrated ? '<p class="ga-tip" style="margin-top:12px">原有成绩数据已自动归入「' +
+      esc(gs[gs.length - 1] ? gs[gs.length - 1].name : '初三') + '」；如实际属于其他年级，可先「重命名」，再用「导出存档 / 导入存档」搬到对应年级。</p>' : '');
+  return html;
+}
+
+function gaGradeCardHTML(g) {
+  var st = jwStatOf(g);
+  var lastLine = st.last
+    ? ('最近：' + st.last.name + ' · ' + st.stu + ' 人' + (st.last.date ? ' · ' + st.last.date : ''))
+    : '还没有成绩数据，进入后导入';
+  return '<div class="jw-card" onclick="gaEnterGrade(\'' + g.id + '\')">' +
+    '<div class="jw-head"><span class="jw-name">' + esc(g.name) + '</span><span class="jw-go">进入 ›</span></div>' +
+    '<div class="jw-meta">' + st.exams + ' 场考试 · ' + st.classes + ' 个班</div>' +
+    '<div class="jw-last" title="' + esc(lastLine) + '">' + esc(lastLine) + '</div>' +
+    '<div class="jw-acts" onclick="event.stopPropagation()">' +
+    '<button onclick="jwRenameGrade(\'' + g.id + '\')">重命名</button>' +
+    '<button onclick="jwExportGrade(\'' + g.id + '\')">导出存档</button>' +
+    '<button onclick="jwImportGrade(\'' + g.id + '\')">导入存档</button>' +
+    '<button class="jw-danger" onclick="jwDelGrade(\'' + g.id + '\')">删除</button>' +
+    '</div></div>';
+}
+
+function gaGradeBar() {
+  var g = jwActive();
+  if (!g) return '';
+  var st = jwStatOf(g);
+  return '<div class="jw-bar">' +
+    '<span class="jw-tag">当前年级</span><b class="jw-curname">' + esc(g.name) + '</b>' +
+    '<span class="jw-barmeta">' + st.exams + ' 场考试 · ' + st.classes + ' 个班</span>' +
+    '<button class="btn btn-default btn-sm" style="margin-left:auto" onclick="gaGradePick()">⇄ 切换年级</button></div>';
+}
+
+function gaEnterGrade(id) {
+  if (!jwSetCur(id)) return;
+  var g = jwActive();
+  gaGate = false;
+  gaTab = 'avg';
+  _gaRankCache = {};
+  _gaRosterKw = ''; _gaRosterCls = '';
+  _gaRosterSort = { key: '', dir: 0 };
+  save();
+  renderPage();
+  toast('已进入「' + (g ? g.name : '') + '」教务档案');
+}
+
+function gaGradePick() {
+  gaGate = true;
+  renderPage();
+}
+
+function jwAddGrade() {
+  jwEnsure();
+  var name = String(prompt('新年级名称（如：高一年级）', '') || '').trim();
+  if (!name) return;
+  if (DATA.jw.grades.some(function(g) { return g.name === name; })) { toast('已有同名年级', 'error'); return; }
+  DATA.jw.grades.push({ id: 'g' + Date.now().toString(36), name: name, data: gaDefault() });
+  save(); renderPage();
+  toast('已新增「' + name + '」，点击卡片进入');
+}
+
+function jwRenameGrade(id) {
+  var g = jwFind(id);
+  if (!g) return;
+  var name = String(prompt('修改年级名称', g.name) || '').trim();
+  if (!name || name === g.name) return;
+  if (DATA.jw.grades.some(function(x) { return x !== g && x.name === name; })) { toast('已有同名年级', 'error'); return; }
+  g.name = name;
+  save(); renderPage();
+  toast('已重命名为「' + name + '」');
+}
+
+function jwDelGrade(id) {
+  var g = jwFind(id);
+  if (!g) return;
+  if (DATA.jw.grades.length <= 1) { toast('至少保留一个年级', 'error'); return; }
+  var st = jwStatOf(g);
+  var msg = st.exams
+    ? '「' + g.name + '」下有 ' + st.exams + ' 场考试的成绩数据，删除后不可恢复。确定删除？'
+    : '确定删除「' + g.name + '」？';
+  if (!confirm(msg)) return;
+  DATA.jw.grades = DATA.jw.grades.filter(function(x) { return x.id !== id; });
+  if (DATA.jw.cur === id) DATA.jw.cur = DATA.jw.grades[0].id;
+  _gaRankCache = {};
+  save(); renderPage();
+  toast('已删除「' + g.name + '」');
+}
+
+function jwExportGrade(id) {
+  var g = jwFind(id);
+  if (!g) return;
+  var payload = { type: 'jiaowu-grade', v: 1, name: g.name, exportedAt: new Date().toISOString(), data: g.data };
+  var fname = '教务系统_' + String(g.name).replace(/[\\\/:*?"<>|]/g, '_') + '_' + todayStr() + '.json';
+  try {
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { try { document.body.removeChild(a); URL.revokeObjectURL(a.href); } catch (e) {} }, 300);
+    toast('已导出「' + g.name + '」存档：' + fname);
+  } catch (e) { toast('导出失败：' + e.message, 'error'); }
+}
+
+function jwImportGrade(id) {
+  var g = jwFind(id);
+  if (!g) return;
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json,application/json';
+  inp.onchange = function() {
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function(e) {
+      var data = null;
+      try {
+        var o = JSON.parse(e.target.result);
+        data = (o && o.type === 'jiaowu-grade') ? o.data : (o && o.exams ? o : null);
+      } catch (err) {
+        toast('解析失败：' + err.message, 'error');
+        return;
+      }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) { toast('不是有效的年级存档文件', 'error'); return; }
+      var inSt = jwStatOf({ data: data });
+      if (!confirm('将把「' + g.name + '」现有数据（' + jwStatOf(g).exams + ' 场考试）替换为文件中的 ' +
+        inSt.exams + ' 场考试，确定导入？')) return;
+      g.data = data;
+      if (DATA.jw.cur === id) _gaRankCache = {};
+      save(); renderPage();
+      toast('已导入存档到「' + g.name + '」');
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
 
 // 科目「计入总分/排名」开关（按当前考试单独设置）
 function gaSubjCountHTML(ex) {
@@ -5318,19 +5650,25 @@ function gaAvgHTML(ex) {
 // ---------- 优秀率 / 合格率 ----------
 function gaRateHTML(ex) {
   var subs = gaSubjects();
-  var html = '<div class="card"><div class="card-title">🎯 分数线设置（修改后即时重算）</div><div class="ga-linebox">';
+  var html = '<div class="card"><div class="card-title">🎯 分数线设置（修改后即时重算并自动保存）</div><div class="ga-linebox">';
   subs.forEach(function(s, i) {
     var L = gaLine(ex, s);
     html += '<div class="ga-lineitem"><b>' + esc(s) + '</b>优秀≥' +
       '<input type="number" id="ga-ex-' + i + '" value="' + L.ex + '" oninput="gaLineChanged()">合格≥' +
       '<input type="number" id="ga-pa-' + i + '" value="' + L.pass + '" oninput="gaLineChanged()"></div>';
   });
-  var TL = gaLine(ex, GA_TOTAL);
-  html += '<div class="ga-lineitem" style="border-color:var(--primary)"><b>总分</b>优秀≥' +
-    '<input type="number" id="ga-ex-t" value="' + TL.ex + '" oninput="gaLineChanged()">合格≥' +
-    '<input type="number" id="ga-pa-t" value="' + TL.pass + '" oninput="gaLineChanged()"></div>' +
-    '<button class="btn btn-default btn-sm" onclick="gaResetLines()">恢复默认分数线</button></div>' +
-    '<p class="ga-tip" style="margin:8px 0 0">默认阈值取自“期末考试质量分析”原表（语数英 117/78、历史道法 45/30、物理 90/60、总分 531/354），可按本校实际调整。</p></div>';
+  var TL = gaTotalLine(ex);
+  html += '<div class="ga-lineitem" style="border-color:var(--primary);background:#eef6ff"><b>总分</b>优秀≥' +
+    '<input type="number" id="ga-ex-t" value="' + TL.ex + '" readonly title="由各科优秀线自动求和，不可直接修改" ' +
+    'style="background:#e3eaf2;color:#334155;cursor:not-allowed;font-weight:600">合格≥' +
+    '<input type="number" id="ga-pa-t" value="' + TL.pass + '" readonly title="由各科合格线自动求和，不可直接修改" ' +
+    'style="background:#e3eaf2;color:#334155;cursor:not-allowed;font-weight:600">' +
+    '<span style="color:#2563eb;font-size:11px">自动求和</span></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="gaSaveLinePreset()">💾 保存为默认标准</button>' +
+    '<button class="btn btn-default btn-sm" onclick="gaResetLines()">↩ 恢复默认分数线</button></div>' +
+    '<p class="ga-tip" style="margin:8px 0 0">' +
+    '<b>总分线 = 各科线之和</b>：修改任意一科，总分自动重新累加（不计入总分的科目不参与累加，可在「📊 均分与排名」页取消勾选）。' +
+    '当前默认标准来源：<b>' + gaLinePresetLabel() + '</b>。点击「保存为默认标准」后，以后再新建考试会自动套用这套分数线；本场考试的修改已随记录自动保存。</p></div>';
   html += '<div id="ga-rate-tables">' + gaRateTablesHTML(ex) + '</div>';
   return html;
 }
@@ -5396,21 +5734,46 @@ function gaLineChanged() {
     if (e) gaLine(ex, s).ex = Number(e.value) || 0;
     if (p) gaLine(ex, s).pass = Number(p.value) || 0;
   });
+  // 总分不再手填：由各科线自动累加，这里只刷新只读显示
+  var TL = gaTotalLine(ex);
   var et = el('ga-ex-t'), pt = el('ga-pa-t');
-  if (et) gaLine(ex, GA_TOTAL).ex = Number(et.value) || 0;
-  if (pt) gaLine(ex, GA_TOTAL).pass = Number(pt.value) || 0;
+  if (et) et.value = TL.ex;
+  if (pt) pt.value = TL.pass;
+  _gaRankCache = {};
   save();
   var box = el('ga-rate-tables');
   if (box) box.innerHTML = gaRateTablesHTML(ex);
+}
+
+// 当前使用的默认标准来源（用于界面提示）
+function gaLinePresetLabel() {
+  var lp = ga().linePreset;
+  var has = lp && typeof lp === 'object' && Object.keys(lp).length > 0;
+  return has ? '自定义标准（已保存）' : '内置预设（期末考试质量分析原表）';
+}
+
+// 把当前考试的分数线保存为全局默认标准，以后新建考试自动套用
+function gaSaveLinePreset() {
+  var ex = gaCurExam();
+  if (!ex) { toast('请先选择一场考试', 'error'); return; }
+  var d = ga(), subs = gaSubjects(), obj = {};
+  subs.forEach(function(s) {
+    var L = gaLine(ex, s);
+    obj[s] = { ex: Number(L.ex) || 0, pass: Number(L.pass) || 0 };
+  });
+  d.linePreset = obj;
+  save();
+  renderPage();
+  toast('已保存为默认标准（' + subs.length + ' 个科目），新建考试将自动套用');
 }
 
 function gaResetLines() {
   var ex = gaCurExam();
   if (!ex) return;
   ex.lines = {};
-  gaLine(ex, GA_TOTAL);
+  _gaRankCache = {};
   save(); renderPage();
-  toast('已恢复默认分数线');
+  toast('已恢复默认分数线（' + gaLinePresetLabel() + '）');
 }
 
 // ---------- 分数段统计 ----------
@@ -5490,7 +5853,7 @@ function gaRosterHTML(ex) {
     '<input class="ga-inp" style="max-width:220px" placeholder="按姓名 / 考试号搜索" value="' + esc(_gaRosterKw) + '" oninput="gaRosterSearch(this.value)">' +
     '<button class="btn btn-default btn-sm" onclick="gaRosterAdd()">＋ 添加学生</button>' +
     '<button class="btn btn-default btn-sm" onclick="gaExportCSV()">⬇ 导出成绩表 CSV</button>' +
-    '<span class="ga-tip">姓名 / 班级 / 考试号 / 各科成绩均可直接修改，改完点空白处即保存并重算名次</span></div>' +
+    '<span class="ga-tip">姓名 / 班级 / 考试号 / 各科成绩均可直接修改，改完点空白处即保存并重算名次；<b>单击任一科目列头</b>可按该科成绩从高到低排序</span></div>' +
     '<div id="ga-roster-table">' + gaRosterTableHTML(ex) + '</div></div>';
   return html;
 }
@@ -5499,23 +5862,53 @@ function gaRosterTableHTML(ex) {
   var allSubs = gaSubjects(), rk = gaRankMapCached(ex), kw = _gaRosterKw.trim().toLowerCase();
   var counted = gaCountedSubjects(ex);
   var list = (ex.students || []).slice();
-  list.sort(function(a, b) {
+  var byRank = function(a, b) {
     var ra = rk[gaStuKey(a)], rb = rk[gaStuKey(b)];
     return (ra ? ra.rank : 99999) - (rb ? rb.rank : 99999);
-  });
+  };
   if (_gaRosterCls) list = list.filter(function(s) { return String(s.cls || '') === _gaRosterCls; });
   if (kw) list = list.filter(function(s) {
     return String(s.name || '').toLowerCase().indexOf(kw) >= 0 ||
       String(s.cls || '').toLowerCase().indexOf(kw) >= 0 ||
       String(s.no || '').toLowerCase().indexOf(kw) >= 0;
   });
+
+  // 排序：默认按年级名次；点了某科列头则按该科成绩排，缺考（无分）一律排在最后，同分再按年级名次
+  var sk = _gaRosterSort.key, sd = Number(_gaRosterSort.dir) || 0;
+  if (sk && sd && allSubs.indexOf(sk) >= 0) {
+    list.sort(function(a, b) {
+      var va = gaNum(a.scores ? a.scores[sk] : null);
+      var vb = gaNum(b.scores ? b.scores[sk] : null);
+      if (va === null && vb === null) return byRank(a, b);
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      if (va !== vb) return sd === 1 ? (vb - va) : (va - vb);
+      return byRank(a, b);
+    });
+  } else {
+    list.sort(byRank);
+  }
+
   if (!list.length) return '<div class="empty">' + ((kw || _gaRosterCls) ? '当前筛选条件下没有学生' : '暂无学生成绩') + '</div>';
-  var html = '<div class="ga-scroll"><table class="ga-tbl"><thead><tr>' +
+
+  var html = '';
+  if (sk && sd && allSubs.indexOf(sk) >= 0) {
+    html += '<div class="ga-sortbar">已按<b>「' + esc(sk) + '」</b>成绩' + (sd === 1 ? '从高到低' : '从低到高') +
+      '排序（该科缺考的排在最后；同分按年级名次先后）' +
+      '<button onclick="gaRosterSortReset()">✕ 恢复年级名次排序</button></div>';
+  }
+
+  html += '<div class="ga-scroll"><table class="ga-tbl"><thead><tr>' +
     '<th>年级名次</th><th>姓名</th><th>班级</th><th>考试号</th>';
   allSubs.forEach(function(s) {
-    var oc = gaIsCounted(ex, s) ? '' : ' class="ga-offcol"';
-    var tag = gaIsCounted(ex, s) ? '' : ' <span class="ga-offtag">不计</span>';
-    html += '<th' + oc + '>' + esc(s) + tag + '</th>';
+    var on = gaIsCounted(ex, s);
+    var act = (_gaRosterSort.key === s) ? (Number(_gaRosterSort.dir) || 0) : 0;
+    var cls = 'ga-sortable' + (on ? '' : ' ga-offcol') + (act ? ' ga-sorted' : '');
+    var tag = on ? '' : ' <span class="ga-offtag">不计</span>';
+    var ico = act === 1 ? '▼' : act === 2 ? '▲' : '⇅';
+    html += '<th class="' + cls + '" onclick="gaRosterSortBy(\'' + esc(s) + '\')" title="点击按「' + esc(s) +
+      '」成绩排序：高→低 → 低→高 → 恢复年级名次">' + esc(s) + tag +
+      '<span class="ga-sortico">' + ico + '</span></th>';
   });
   html += '<th>总分</th><th>进步率</th><th>状态</th><th>操作</th></tr></thead><tbody>';
   list.forEach(function(s) {
@@ -5554,6 +5947,26 @@ function gaRosterSearch(v) {
 
 function gaRosterClassFilter(v) {
   _gaRosterCls = v || '';
+  var ex = gaCurExam();
+  if (!ex) return;
+  var box = el('ga-roster-table');
+  if (box) box.innerHTML = gaRosterTableHTML(ex);
+}
+
+// 单击科目列头排序：第一次「高→低」，再点「低→高」，第三次恢复年级名次
+function gaRosterSortBy(subj) {
+  if (_gaRosterSort.key !== subj) { _gaRosterSort.key = subj; _gaRosterSort.dir = 1; }
+  else if (_gaRosterSort.dir === 1) _gaRosterSort.dir = 2;
+  else if (_gaRosterSort.dir === 2) { _gaRosterSort.key = ''; _gaRosterSort.dir = 0; }
+  else { _gaRosterSort.dir = 1; }
+  var ex = gaCurExam();
+  if (!ex) return;
+  var box = el('ga-roster-table');
+  if (box) box.innerHTML = gaRosterTableHTML(ex);
+}
+
+function gaRosterSortReset() {
+  _gaRosterSort = { key: '', dir: 0 };
   var ex = gaCurExam();
   if (!ex) return;
   var box = el('ga-roster-table');
@@ -5632,13 +6045,20 @@ function gaDiffData(ex) {
     row.totalCell = tc; out.cells.push(tc);
     out.byCls.push(row);
   });
-  // 名次：所有有差值的「班级×科目」组合，差值大者名次靠前，并列同名次
-  var alive = out.cells.filter(function(c) { return c.diff !== null && c.diff !== undefined; })
-    .sort(function(a, b) { return b.diff - a.diff; });
-  var prev = null, pr = 0;
-  alive.forEach(function(c, i) {
-    var r = (prev !== null && Math.abs(c.diff - prev) < 1e-9) ? pr : i + 1;
-    c.rank = r; prev = c.diff; pr = r;
+  // 名次：按学科分组，只在同学科内排名（「总分」自成一组），差值大者名次靠前，并列同名次
+  var bySubj = {};
+  out.cells.forEach(function(c) {
+    if (c.diff === null || c.diff === undefined) return;
+    var k = c.subj || GA_TOTAL;
+    (bySubj[k] = bySubj[k] || []).push(c);
+  });
+  Object.keys(bySubj).forEach(function(k) {
+    var arr = bySubj[k].sort(function(a, b) { return b.diff - a.diff; });
+    var prev = null, pr = 0;
+    arr.forEach(function(c, i) {
+      var r = (prev !== null && Math.abs(c.diff - prev) < 1e-9) ? pr : i + 1;
+      c.rank = r; prev = c.diff; pr = r;
+    });
   });
   return out;
 }
@@ -5678,23 +6098,31 @@ function gaDiffHTML(ex) {
     html += '<td class="ga-num">' + gaDiffCell(row.totalCell) + '</td></tr>';
   });
   html += '</tbody></table></div>' +
-    '<p class="ga-tip" style="margin:10px 0 0">红色为进步（＋）、绿色为退步（－）；格内徽章是该「班级×学科」差值在本年级全部组合中的排名（差值越大名次越靠前，并列同名次）。均分口径与「📊 均分与排名」一致（缺考不计入分母）；若两场考试在「计入总分/排名的科目」上设置不同，则总分差值按各自设置分别计算。</p></div>';
+    '<p class="ga-tip" style="margin:10px 0 0">红色为进步（＋）、绿色为退步（－）；格内徽章是该班该科差值在<b>本学科各班级</b>中的排名（差值越大名次越靠前，并列同名次；「总分」单独成组），不同学科之间不做横向比较。均分口径与「📊 均分与排名」一致（缺考不计入分母）；若两场考试在「计入总分/排名的科目」上设置不同，则总分差值按各自设置分别计算。</p></div>';
 
-  // 排行榜
-  var list = d.cells.filter(function(c) { return c.diff !== null && c.diff !== undefined; })
-    .sort(function(a, b) { return b.diff - a.diff; });
-  html += '<div class="card"><div class="card-title">🏆 差值排行榜（进步幅度由大到小）</div><div class="ga-scroll">' +
-    '<table class="ga-tbl"><thead><tr><th>排名</th><th>班级</th><th>科目</th><th>上次均分</th><th>本次均分</th><th>差值</th></tr></thead><tbody>';
-  list.forEach(function(c) {
-    var v = Math.round(c.diff * 100) / 100;
-    var k = v > 0 ? 'ga-up' : (v < 0 ? 'ga-down' : 'ga-flat');
-    html += '<tr><td class="ga-num">' + (c.rank <= 3 ? '<span class="badge" style="background:var(--primary);color:#fff">' + c.rank + '</span>' : c.rank) + '</td>' +
-      '<td>' + esc(c.cls) + '</td><td>' + esc(c.subj) + '</td>' +
-      '<td class="ga-num">' + gaFmtNum(c.pre) + '</td><td class="ga-num">' + gaFmtNum(c.cur) + '</td>' +
-      '<td class="ga-num"><span class="' + k + '">' + (v > 0 ? '+' : '') + v.toFixed(2) + '</span></td></tr>';
+  // 排行榜：按学科分组，各自在本学科内排名
+  var grpList = d.subs.map(function(s) {
+    return { name: s, cells: d.cells.filter(function(c) { return c.subj === s; }) };
+  });
+  grpList.push({ name: GA_TOTAL, cells: d.cells.filter(function(c) { return c.subj === GA_TOTAL; }) });
+  html += '<div class="card"><div class="card-title">🏆 差值排行榜（按学科分组 · 组内由进步到退步）</div><div class="ga-scroll">' +
+    '<table class="ga-tbl"><thead><tr><th>排名</th><th>班级</th><th>上次均分</th><th>本次均分</th><th>差值</th></tr></thead><tbody>';
+  grpList.forEach(function(g) {
+    var arr = g.cells.filter(function(c) { return c.diff !== null && c.diff !== undefined; });
+    html += '<tr><td colspan="5" style="background:#f3f4f6;font-weight:600;text-align:left;color:var(--text-l)">' +
+      esc(g.name) + '　<span style="font-weight:400">' +
+      (arr.length ? arr.length + ' 个班级参与排名' : '无可比数据') + '</span></td></tr>';
+    arr.forEach(function(c) {
+      var v = Math.round(c.diff * 100) / 100;
+      var k = v > 0 ? 'ga-up' : (v < 0 ? 'ga-down' : 'ga-flat');
+      html += '<tr><td class="ga-num">' + (c.rank <= 3 ? '<span class="badge" style="background:var(--primary);color:#fff">' + c.rank + '</span>' : c.rank) + '</td>' +
+        '<td>' + esc(c.cls) + '</td>' +
+        '<td class="ga-num">' + gaFmtNum(c.pre) + '</td><td class="ga-num">' + gaFmtNum(c.cur) + '</td>' +
+        '<td class="ga-num"><span class="' + k + '">' + (v > 0 ? '+' : '') + v.toFixed(2) + '</span></td></tr>';
+    });
   });
   html += '</tbody></table></div>' +
-    '<p class="ga-tip" style="margin:10px 0 0">共 ' + list.length + ' 个「班级×科目」组合参与排名（含各班「总分」行）。</p></div>';
+    '<p class="ga-tip" style="margin:10px 0 0">排名只在同学科内比较：每个学科（含「总分」）各自按差值从大到小排名，不同学科分差大小不同，不跨学科比较。</p></div>';
   return html;
 }
 
@@ -5710,12 +6138,14 @@ function gaExportDiffCSV() {
     lines.push([row.cls].concat(vals).map(q).join(','));
   });
   lines.push('');
-  lines.push(['排名', '班级', '科目', '上次均分', '本次均分', '差值'].map(q).join(','));
-  d.cells.filter(function(c) { return c.diff !== null && c.diff !== undefined; })
-    .sort(function(a, b) { return b.diff - a.diff; })
-    .forEach(function(c) {
-      lines.push([c.rank, c.cls, c.subj, gaFmtNum(c.pre), gaFmtNum(c.cur), (Math.round(c.diff * 100) / 100).toFixed(2)].map(q).join(','));
-    });
+  lines.push(['学科', '学科内排名', '班级', '上次均分', '本次均分', '差值'].map(q).join(','));
+  d.subs.concat([GA_TOTAL]).forEach(function(s) {
+    d.cells.filter(function(c) { return c.subj === s && c.diff !== null && c.diff !== undefined; })
+      .sort(function(a, b) { return b.diff - a.diff; })
+      .forEach(function(c) {
+        lines.push([c.subj, c.rank, c.cls, gaFmtNum(c.pre), gaFmtNum(c.cur), (Math.round(c.diff * 100) / 100).toFixed(2)].map(q).join(','));
+      });
+  });
   var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -5825,10 +6255,40 @@ function gaDelSubjectPick() {
   save(); renderPage(); toast('已删除科目');
 }
 
+// ---------- 单科成绩删除（按考试） ----------
+// 统计某场考试某科“有分数”的人数
+function gaSubjFilled(ex, subj) {
+  var n = 0;
+  (ex && ex.students || []).forEach(function(s) {
+    if (s && gaNum(s.scores ? s.scores[subj] : null) !== null) n++;
+  });
+  return n;
+}
+
+// 只清空「当前考试」的某一科成绩，保留学生与其他科目，便于该科重新导入
+function gaClearSubjectScores(subj) {
+  var ex = gaCurExam();
+  if (!ex) return;
+  if (gaSubjects().indexOf(subj) < 0) { toast('未找到该科目', 'error'); return; }
+  var n = gaSubjFilled(ex, subj);
+  if (!n) { toast('「' + subj + '」在本场考试中已经没有成绩', 'error'); return; }
+  if (!confirm('确定删除「' + subj + '」在「' + ex.name + '」中的 ' + n + ' 条成绩？\n\n' +
+    '· 只清空这一科，其他科目、学生名单、分数线都不受影响\n' +
+    '· 删除后该科为空白（缺考），可立即重新导入该科\n' +
+    '· 删除不可撤销，建议先「导出当前成绩 CSV」留底')) return;
+  (ex.students || []).forEach(function(s) {
+    if (s && s.scores && Object.prototype.hasOwnProperty.call(s.scores, subj)) s.scores[subj] = null;
+  });
+  _gaRankCache = {};
+  save(); renderPage();
+  toast('已删除「' + subj + '」的 ' + n + ' 条成绩，可重新导入该科');
+}
+
 // ---------- 数据导入 ----------
 function gaDataHTML(ex) {
   var d = ga();
-  var html = '<div class="card"><div class="card-title">📥 导入成绩数据</div>' +
+  var html = '<div class="card"><div class="card-title">📥 导入成绩数据' +
+    '<span class="badge" style="margin-left:8px;background:var(--primary-light);color:var(--primary-dark)">仅导入到「' + esc(jwActiveName()) + '」</span></div>' +
     '<div class="flex gap" style="flex-wrap:wrap;margin-bottom:10px">' +
     '<button class="btn btn-primary" onclick="gaImportOpen()">＋ 导入成绩（Excel / CSV）</button>' +
     '<button class="btn btn-default" onclick="gaLoadSample()">载入示例数据</button>' +
@@ -5837,6 +6297,21 @@ function gaDataHTML(ex) {
     '</div>' +
     '<p class="ga-tip" style="margin:0 0 8px">支持 <b>.xlsx</b>（可选择任意工作表）、<b>.csv</b>（建议 UTF-8 编码）与<b>直接粘贴</b>表格数据。列名只要包含「姓名」「班级」「考试号」以及各科目名称即可自动识别；某科留空即视为该生该科<b>缺考</b>，缺考学生不计入年级排名。<br>导入后可在「📊 均分与排名」页勾选<b>「计入总分/排名的科目」</b>（如初二期末未考化学，取消勾选即可，不会因缺化学分而被判缺考）；也可到「👥 成绩名单」页<b>直接修改任何一条成绩</b>，或按班级筛选查阅。</p>' +
     '<p class="ga-tip" style="margin:0"><b>分科目分批导入</b>：语文、数学、英语…若是分开的文件，先用第一份<b>新建一场考试</b>，之后每份文件都选<b>「合并到已有考试」</b>并选中同一场考试即可 —— 系统按<b>姓名</b>自动把各科成绩归到同一名学生名下（优先考试号，其次 班级+姓名），名字对不上的自动建为新学生。同名重名的会列出来让你手工确认，绝不猜着写。合并时<b>只写入有数字的单元格，空白一律保留原分数不动</b>。<br><b>班级名</b>一律归一成「<b>N班</b>」：文件里写 <code>10</code>、<code>10.0</code>、<code>10班</code>、<code>初三10班</code> 都会归到「10班」，已建班级名也一并统一。</p></div>';
+
+  // 按科目删除（仅当前这一场考试）：导入某科出错时，清空该科即可重新导入
+  if (ex) {
+    html += '<div class="card"><div class="card-title">🧹 删除单科成绩 · 便于重新导入' +
+      '<span class="badge" style="margin-left:8px;background:var(--primary-light);color:var(--primary-dark)">仅「' + esc(ex.name) + '」</span></div>' +
+      '<p class="ga-tip" style="margin:0 0 8px">某一科导错了？点该科右侧「删除」即可<b>只清空这一科的全部成绩</b>，其他科目、学生名单、分数线设置都不动；随后用上面的「导入成绩 → 合并到已有考试」重新导入该科即可（按姓名/考试号归位，不会重复建人）。</p>' +
+      '<div class="ga-subdel">';
+    gaSubjects().forEach(function(s) {
+      var n = gaSubjFilled(ex, s);
+      html += '<div class="ga-subdelitem"><b>' + esc(s) + '</b><span class="ga-cnt">' + n + ' 人有分</span>' +
+        '<button' + (n ? '' : ' disabled') + ' onclick="gaClearSubjectScores(\'' + esc(s) + '\')">删除</button></div>';
+    });
+    html += '</div>' +
+      '<p class="ga-tip" style="margin:8px 0 0">删除后该科在成绩名单中显示为<b>缺考（空白）</b>，该生暂不计入年级排名；重新导入后自动恢复。建议删除前先用上面的「导出当前成绩 CSV」留一份底。</p></div>';
+  }
 
   html += '<div class="card"><div class="card-title">📚 已导入考试（' + d.exams.length + '）</div>';
   if (!d.exams.length) html += '<div class="empty">还没有导入任何考试</div>';
@@ -5860,7 +6335,7 @@ function gaDataHTML(ex) {
     '<li><b>年级排名</b>：同分并列取同名次（与 Excel RANK 一致）。</li>' +
     '<li><b>进步率</b> =（上次考试的年级名次 − 本次考试的年级名次）÷ 上次考试的年级名次；正值表示名次前进。</li>' +
     '<li><b>均分 / 优秀率 / 合格率</b>：分母均为“有该科成绩的人数”，缺考不计入。</li>' +
-    '<li><b>优秀线 / 合格线</b>：可按科目分别设置，位于「🎯 优秀率/合格率」页顶部。</li>' +
+    '<li><b>优秀线 / 合格线</b>：可按科目分别设置，位于「🎯 优秀率/合格率」页顶部。<b>总分线 = 各科线之和</b>，随学科修改自动重算；可点「保存为默认标准」，供以后新建考试沿用。</li>' +
     '<li><b>分数段</b>：按总分“累计人数”统计（如 470分以上 = 总分 ≥ 470 的人数）。</li>' +
     '</ul>' +
     '<div class="mt"><button class="btn btn-danger btn-sm" onclick="gaClearGrade()">清空本模块数据</button></div></div>';
@@ -5881,6 +6356,7 @@ function gaSwapExam(id) {
   var d = ga();
   d.curId = Number(id);
   _gaRankCache = {};
+  _gaRosterSort = { key: '', dir: 0 };   // 换考试后回到默认的年级名次排序
   save(); renderPage();
 }
 
@@ -5913,11 +6389,12 @@ function gaDelExam(id) {
 }
 
 function gaClearGrade() {
-  if (!confirm('确定清空「年级成绩分析」的全部数据（教师表 + 所有考试成绩）？此操作不可恢复。')) return;
-  if (!confirm('再次确认：清空后本模块所有成绩与教师信息都会丢失！')) return;
+  var nm = jwActiveName();
+  if (!confirm('确定清空「' + nm + '」的全部成绩数据（教师表 + 所有考试成绩）？其他年级不受影响，但本年级数据不可恢复。')) return;
+  if (!confirm('再次确认：清空后「' + nm + '」所有成绩与教师信息都会丢失！')) return;
   DATA.grade = gaDefault();
   _gaRankCache = {};
-  save(); renderPage(); toast('已清空年级成绩分析数据');
+  save(); renderPage(); toast('已清空「' + nm + '」的成绩数据');
 }
 
 // ---------- 导入：文件 / 粘贴 ----------
@@ -7073,7 +7550,8 @@ function gaExportXlsxOpen() {
 
 function xaFileName(ex) {
   var nm = String(ex && ex.name || '成绩分析').replace(/[\\\/:*?"<>|]/g, '_');
-  return '期末考试质量分析_' + nm + '_' + todayStr() + '.xlsx';
+  var gn = String(jwActiveName() || '').replace(/[\\\/:*?"<>|]/g, '_');
+  return '期末考试质量分析_' + (gn ? gn + '_' : '') + nm + '_' + todayStr() + '.xlsx';
 }
 
 function gaExportXlsxRun() {
@@ -7613,7 +8091,7 @@ function clearAllData() {
         recitation: recDefault(),
         teaching: { notes: '', sites: seedSites(), folders: [] },
         docs: { categories: docDefaultCats(), items: [], currentCategory: 'c1' },
-        grade: gaDefault(),
+        jw: jwDefaultStore(),
         tips: { qaHistory: [], replyHistory: [] },
         ai: { base: 'https://api.deepseek.com', model: 'deepseek-chat' }
       };
@@ -10127,8 +10605,9 @@ function exportDocWord(id) {
 //  ------------------------------------------------------------
 //  · 探测不到资料库 SDK 时（例如本地双击 file:// 打开），本篇逻辑完全不生效，
 //    工作台照旧走单机 localStorage，功能一点不受影响。
-//  · 整份数据按顶层模块切成若干「分片」，每片一条记录；年级考试再按每场考试
-//    单独成片，避免单条记录越滚越大。
+//  · 整份数据按顶层模块切成若干「分片」，每片一条记录；教务系统再按「年级 → 考试」
+//    两级单独成片（s:jw 只存年级清单，gr: 存年级非考试数据，gx2: 存单场考试），
+//    避免单条记录越滚越大，也避免不同年级的数据互相串档。
 //  · 拉取时逐片比时间：只有云端更新的分片才覆盖本地——别的设备改了「待办」，
 //    不会冲掉这边刚录的「成绩」。
 //  · 截图上传云端图床换取地址，任何登录同一账号的设备都能看到。
@@ -10137,8 +10616,7 @@ var DATABASE_ID = 'Wenl2fZoHICdFby2xJ559w';
 var WB_META_KEY = 'banzhuren_cloud_meta';
 var WB_PUSH_DELAY = 1500;
 var WB_S_PREFIX = 's:';
-var WB_GX_PREFIX = 'gx:';
-var WB_GMETA_KEY = 'gmeta';
+// 旧版分片键（v1：gmeta / gx:<考试id>）已停用：新版按年级分片，见 wbShardsFrom
 var WB_IMG_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml', 'image/heic', 'image/heif', 'image/tiff'];
 // 「工作台云数据」表的四个字段名（建表返回的真实字段，不可臆造）
 var WB_KEY_FIELD = '分片键', WB_BODY_FIELD = '内容', WB_TS_FIELD = '更新时间', WB_DEV_FIELD = '设备';
@@ -10425,56 +10903,111 @@ function wbCloudFail(e, where) {
   try { console.warn('[云同步] ' + (where || '') + ' → ' + w.f, e); } catch (x) {}
 }
 // 把 DATA 切成 分片键 -> JSON 字符串
+// 分片方案 v2（多年级）：
+//   s:jw             年级清单 {v, cur, grades:[{id,name}]}（不含数据本体）
+//   gr:<年级id>      该年级的非考试数据 {rest, order}
+//   gx2:<年级id>:<考试id>  该年级的某一场考试
+// 旧版 gm / gx:<考试id> 不再写入；拉取时忽略（本机已有数据，升级后会重新推送 v2）
+var WB_JW_KEY = 's:jw';
+var WB_GREST_PREFIX = 'gr:';
+var WB_GEX_PREFIX = 'gx2:';
+
 function wbShardsFrom(data) {
-  var out = {}, k, g, meta = {}, exs = [], order = [];
+  var out = {}, k;
   data = data || {};
+  if (data === DATA) { try { jwEnsure(); } catch (e) {} }
   for (k in data) {
     if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
     if (data[k] === undefined) continue;
-    if (k === 'grade') continue;
+    if (k === 'grade' || k === 'jw') continue;
     out[WB_S_PREFIX + k] = JSON.stringify(data[k]);
   }
-  g = data.grade || {};
-  for (k in g) {
-    if (!Object.prototype.hasOwnProperty.call(g, k)) continue;
-    if (k === 'exams') { exs = g.exams || []; continue; }
-    meta[k] = g[k];
-  }
-  (exs || []).forEach(function(ex) {
-    if (!ex || ex.id === undefined || ex.id === null) return;
-    order.push(ex.id);
-    out[WB_GX_PREFIX + ex.id] = JSON.stringify(ex);
+  var jw = data.jw || {};
+  var list = Array.isArray(jw.grades) ? jw.grades : [];
+  out[WB_JW_KEY] = JSON.stringify({
+    v: 1,
+    cur: jw.cur || null,
+    grades: list.map(function(g) { return { id: g.id, name: g.name }; })
   });
-  out[WB_GMETA_KEY] = JSON.stringify({ rest: meta, order: order });
+  list.forEach(function(g) {
+    var gd = g.data || {};
+    var rest = {}, ids = [];
+    for (var rk in gd) {
+      if (!Object.prototype.hasOwnProperty.call(gd, rk)) continue;
+      if (rk === 'exams') continue;
+      rest[rk] = gd[rk];
+    }
+    (Array.isArray(gd.exams) ? gd.exams : []).forEach(function(ex) {
+      if (!ex || ex.id === undefined || ex.id === null) return;
+      ids.push(ex.id);
+      out[WB_GEX_PREFIX + g.id + ':' + ex.id] = JSON.stringify(ex);
+    });
+    out[WB_GREST_PREFIX + g.id] = JSON.stringify({ rest: rest, order: ids });
+  });
   return out;
 }
+
 // 把单个分片写回 DATA（就地合并，不认识的键原样保留）
 function wbApplyShard(data, key, val) {
-  var g, rest, i, id, found;
-  if (key === WB_GMETA_KEY) {
-    g = data.grade || (data.grade = {});
-    rest = (val && val.rest) || {};
-    for (var rk in rest) if (Object.prototype.hasOwnProperty.call(rest, rk)) g[rk] = rest[rk];
+  var jw, g, i, id, found, rest, keep, p, eid;
+  if (key === WB_JW_KEY) {
+    if (!val || typeof val !== 'object') return;
+    jwEnsure();
+    jw = data.jw;
+    keep = [];
+    (Array.isArray(val.grades) ? val.grades : []).forEach(function(item) {
+      if (!item || !item.id) return;
+      var gg = jwFind(item.id);
+      if (!gg) { gg = { id: item.id, name: item.name || '年级', data: gaDefault() }; jw.grades.push(gg); }
+      else if (item.name) gg.name = item.name;
+      keep.push(item.id);
+    });
+    if (keep.length) {   // 云端删掉的年级同步删掉（至少保留一个档）
+      jw.grades = jw.grades.filter(function(x) { return keep.indexOf(x.id) >= 0; });
+      if (jw.grades.length) jw.cur = (val.cur && keep.indexOf(val.cur) >= 0) ? val.cur : jw.grades[0].id;
+    }
     return;
   }
-  if (key.indexOf(WB_GX_PREFIX) === 0) {
-    g = data.grade || (data.grade = {});
-    if (!g.exams) g.exams = [];
-    id = String(key.slice(WB_GX_PREFIX.length));
-    found = -1;
-    for (i = 0; i < g.exams.length; i++) {
-      if (g.exams[i] && String(g.exams[i].id) === id) { found = i; break; }
+  if (key.indexOf(WB_GREST_PREFIX) === 0) {
+    id = key.slice(WB_GREST_PREFIX.length);
+    g = jwFind(id);
+    if (!g) {
+      jwEnsure();
+      g = { id: id, name: '年级', data: gaDefault() };
+      data.jw.grades.push(g);
     }
-    if (found >= 0) g.exams[found] = val; else g.exams.push(val);
+    if (!g.data || typeof g.data !== 'object') g.data = gaDefault();
+    rest = (val && val.rest) || {};
+    for (var rk in rest) if (Object.prototype.hasOwnProperty.call(rest, rk)) g.data[rk] = rest[rk];
+    return;
+  }
+  if (key.indexOf(WB_GEX_PREFIX) === 0) {
+    p = key.slice(WB_GEX_PREFIX.length).indexOf(':');
+    if (p < 0) return;
+    id = key.slice(WB_GEX_PREFIX.length).slice(0, p);
+    eid = key.slice(WB_GEX_PREFIX.length).slice(p + 1);
+    g = jwFind(id);
+    if (!g) {
+      jwEnsure();
+      g = { id: id, name: '年级', data: gaDefault() };
+      data.jw.grades.push(g);
+    }
+    if (!g.data || typeof g.data !== 'object') g.data = gaDefault();
+    if (!Array.isArray(g.data.exams)) g.data.exams = [];
+    found = -1;
+    for (i = 0; i < g.data.exams.length; i++) {
+      if (g.data.exams[i] && String(g.data.exams[i].id) === eid) { found = i; break; }
+    }
+    if (found >= 0) g.data.exams[found] = val; else g.data.exams.push(val);
     return;
   }
   if (key.indexOf(WB_S_PREFIX) === 0) data[key.slice(WB_S_PREFIX.length)] = val;
 }
-// 按 meta 分片里的顺序重排年级考试
-function wbOrderGradeExams(val) {
+// 按 gr 分片里的 order 重排某个年级的考试
+function wbOrderGradeExams(gid, val) {
   var order = (val && val.order) || [];
-  var g = DATA.grade || (DATA.grade = {});
-  var exams = g.exams || [];
+  var g = jwFind(gid);
+  var exams = (g && g.data && Array.isArray(g.data.exams)) ? g.data.exams : [];
   if (!order.length || exams.length < 2) return;
   var byId = {}, i, out = [];
   for (i = 0; i < exams.length; i++) if (exams[i]) byId[String(exams[i].id)] = exams[i];
@@ -10485,7 +11018,7 @@ function wbOrderGradeExams(val) {
   for (i = 0; i < exams.length; i++) {
     if (exams[i] && byId[String(exams[i].id)]) out.push(exams[i]);
   }
-  if (out.length === exams.length) g.exams = out;
+  if (out.length === exams.length) g.data.exams = out;
 }
 // 读取云端全部分片 → { map, ts, ids, count }
 // 传入本机已知的云端时间戳，自建通道只回传有变动的分片正文，省流量
@@ -10511,7 +11044,7 @@ function wbCloudPull(opts) {
     var meta = wbCloudMeta();
     meta.shards = meta.shards || {};
     var localShards = wbShardsFrom(DATA);
-    var applied = 0, key, cts, lts;
+    var applied = 0, key, cts, lts, orderJobs = [];
 
     for (key in res.map) {
       if (!Object.prototype.hasOwnProperty.call(res.map, key)) continue;
@@ -10522,13 +11055,15 @@ function wbCloudPull(opts) {
         try { val = JSON.parse(res.map[key]); } catch (e) { val = undefined; }
         // 年级考试分片只认服务端为最新的分片，避免把本地更新覆盖掉
         if (val === undefined) continue;
-        if (key === WB_GMETA_KEY) wbOrderGradeExams(val);
         wbCloud.applying = true;
         try { wbApplyShard(DATA, key, val); } finally { wbCloud.applying = false; }
+        if (key.indexOf(WB_GREST_PREFIX) === 0) orderJobs.push([key.slice(WB_GREST_PREFIX.length), val]);
         meta.shards[key] = cts;
         applied++;
       }
     }
+    // 等所有考试分片都落地后再按 order 重排，避免分片到达顺序影响结果
+    orderJobs.forEach(function(j) { try { wbOrderGradeExams(j[0], j[1]); } catch (e) {} });
     wbCloud.busy = false;
     if (applied) {
       wbCloudSetMeta(meta);
