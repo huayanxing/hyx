@@ -5058,11 +5058,35 @@ function gaNormCls(v) {
   var s = String(v == null ? '' : v).replace(/[\s\u3000]/g, '');
   if (!s) return '';
   s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  // 三位「年级+班号」代码：101→初一1班、201→初二1班、202→初二2班、301→初三1班
+  // 首位 1/2/3 是年级，后两位是班号；本模块按年级独立存档，最终都归到「N班」
+  var c3 = /^[（(]?([1-3])(\d{2})(?:\.0+)?[）)]?(?:班)?$/.exec(s);
+  if (c3) {
+    var cn = parseInt(c3[2], 10);
+    if (cn > 0) return cn + '班';
+  }
   var m = /(\d+)(?:\.0+)?[）)]?\s*班/.exec(s);              // 「10班」「初三10班」「(10)班」
   if (!m) m = /^[（(]?(\d+)(?:\.0+)?[）)]?$/.exec(s);       // 「10」「10.0」「(10)」
   if (!m) return s;
   var n = parseInt(m[1], 10);
   return (n > 0 && n < 1000) ? n + '班' : s;
+}
+
+// 班级代码里的年级位：101→1、201→2、301→3；不是三位代码返回 0
+function gaClsCodeLv(v) {
+  var s = String(v == null ? '' : v).replace(/[\s\u3000]/g, '');
+  s = s.replace(/[０-９]/g, function(c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  var m = /^[（(]?([1-3])(\d{2})(?:\.0+)?[）)]?(?:班)?$/.exec(s);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// 年级名 → 年级位：初一/七年级→1，初二/八年级→2，初三/九年级→3，认不出返回 0
+function gaGradeLevelOf(name) {
+  var s = String(name == null ? '' : name);
+  if (/初一|七年级|7年级|预备/.test(s)) return 1;
+  if (/初二|八年级|8年级/.test(s)) return 2;
+  if (/初三|九年级|9年级/.test(s)) return 3;
+  return 0;
 }
 
 // 把本模块已有的班级名全部统一成「N班」（幂等）。返回被改写的条数。
@@ -6425,10 +6449,11 @@ function gaImportOpen() {
     '</div></div>' +
     '<div id="ga-im-merge-wrap" style="display:none">' +
     '<div class="form-group"><label>合并到哪场考试</label><select id="ga-im-target" onchange="gaImportTargetChange()">' + exOpts + '</select></div>' +
-    '<p class="ga-tip" style="margin:0 0 10px;line-height:1.8">按<b>姓名</b>匹配已有学生（优先考试号，其次 班级+姓名）；只写入文件里<b>有数字</b>的成绩，空白单元格<b>保留原分数不动</b>；姓名对不上的学生自动建为新学生。班级列的数字会自动归一成「<b>N班</b>」。</p>' +
+    '<p class="ga-tip" style="margin:0 0 10px;line-height:1.8">按<b>姓名</b>匹配已有学生（优先考试号，其次 班级+姓名）；只写入文件里<b>有数字</b>的成绩，空白单元格<b>保留原分数不动</b>；姓名对不上的学生自动建为新学生。班级列的数字会自动归一成「<b>N班</b>」，三位代码按「首位年级 + 后两位班号」换算（101/201/301 → 1班）。</p>' +
     '</div>' +
     '<div class="form-group"><label>选择文件（.xlsx / .csv / .txt）</label>' +
     '<input type="file" id="ga-im-file" accept=".xlsx,.csv,.txt" onchange="gaImportPick(this)"></div>' +
+    '<div class="ga-tip" style="margin:-2px 0 10px;line-height:1.8">班级列可填 <b>1班 / 1 / 101</b>：101＝初一1班、201＝初二1班、202＝初二2班、301＝初三1班，导入时统一按班号归一。</div>' +
     '<div class="form-group" id="ga-im-sheet-wrap" style="display:none"><label>选择工作表</label>' +
     '<select id="ga-im-sheet" onchange="gaImportParse()"></select></div>' +
     '<div id="ga-im-msg" class="ga-tip"></div>' +
@@ -6633,9 +6658,13 @@ function gaImportAfterRows() {
   var idx = tex ? gaStuIndex(tex) : null;
   var stat = { matched: 0, created: 0, amb: 0, overwrite: 0, addScore: 0, keep: 0 };
   var marks = [];
+  var clsConv = 0, clsDiff = 0, curLv = gaGradeLevelOf(jwActiveName());
   body.forEach(function(r) {
     var nm = gaImpCell(r[map.name]);
-    var cls = map.cls >= 0 ? gaNormCls(r[map.cls]) : '';
+    var rawCls = map.cls >= 0 ? r[map.cls] : '';
+    var codeLv = map.cls >= 0 ? gaClsCodeLv(rawCls) : 0;
+    if (codeLv) { clsConv++; if (curLv && codeLv !== curLv) clsDiff++; }
+    var cls = map.cls >= 0 ? gaNormCls(rawCls) : '';
     var no = map.no >= 0 ? gaImpCell(r[map.no]) : '';
     var mk = { cls: cls, t: '' };
     if (idx) {
@@ -6661,7 +6690,13 @@ function gaImportAfterRows() {
 
   var pre = manualNote + '<div class="ga-tip" style="margin:10px 0 4px">识别到 <b>' + body.length + '</b> 条学生记录；科目列：' +
     esc(subFound.join('、')) + (map.cls >= 0 ? '；班级列：' + esc(head[map.cls]) : '') +
-    (map.no >= 0 ? '；考试号列：' + esc(head[map.no]) : '') + '</div>';
+    (map.no >= 0 ? '；考试号列：' + esc(head[map.no]) : '') +
+    (clsConv ? '；<b>' + clsConv + '</b> 条班级代码已换算（101/201/301 → 1班）' : '') + '</div>';
+  if (clsDiff) {
+    pre += '<div class="ga-tip" style="margin:0 0 6px;color:var(--warning)">⚠️ 其中 <b>' + clsDiff +
+      '</b> 条班级代码的年级位与本年级（' + esc(jwActiveName() || '当前年级') +
+      '）不一致，例如 2xx 却导入了初三。已按班号归入对应班级，请确认是否导错年级。</div>';
+  }
   if (idx) {
     pre += '<div class="ga-tip" style="margin:0 0 6px">匹配到已有学生 <b>' + stat.matched + '</b> 人 · 自动新增 <b>' + stat.created +
       '</b> 人' + (stat.amb ? ' · <span style="color:var(--warning)">重名待定 ' + stat.amb + ' 人</span>' : '') +
@@ -6903,7 +6938,8 @@ function gaTAfterRows() {
   found.forEach(function(s) { pre += '<th>' + esc(s) + '</th>'; });
   pre += '</tr></thead><tbody>';
   body.forEach(function(r) {
-    pre += '<tr><td><b>' + esc(r[cm.cls]) + '</b></td><td>' + esc(cm.master >= 0 ? r[cm.master] : '') + '</td>';
+    var showCls = gaNormCls(r[cm.cls]) || r[cm.cls];
+    pre += '<tr><td><b>' + esc(showCls) + '</b></td><td>' + esc(cm.master >= 0 ? r[cm.master] : '') + '</td>';
     found.forEach(function(s) { pre += '<td>' + esc(r[cm.subs[s]]) + '</td>'; });
     pre += '</tr>';
   });
