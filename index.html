@@ -725,6 +725,9 @@ details.fhelp summary { cursor: pointer; color: var(--primary); font-weight: 600
 .ga-down { color: var(--success); font-weight: 600; }
 .ga-flat { color: var(--text-l); }
 .ga-absent { color: var(--warning); font-weight: 600; font-size: 12px; }
+.ga-excl-row td { background: #faf8ff; }
+.ga-excl-row input { opacity: .5; }
+.ga-excl-row .ga-inp:focus { opacity: 1; }
 .ga-linebox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ga-lineitem { display: flex; align-items: center; gap: 5px; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; font-size: 12px; white-space: nowrap; }
 .ga-lineitem input { width: 54px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 5px; font-size: 12px; text-align: center; font-family: inherit; }
@@ -4845,7 +4848,7 @@ var _gaRosterKw = '';
 var _gaRosterCls = '';
 // 成绩名单排序：dir 0=按年级名次（默认） 1=该科从高到低 2=该科从低到高
 var _gaRosterSort = { key: '', dir: 0 };
-var _gaSegCfg = { start: 520, step: 10, count: 20 };
+var GA_SEG_BUILTIN = { start: 520, step: 10, count: 20 };   // 分数段内置默认（可被年级级设置覆盖）
 var _gaImp = { buffer: null, sheets: null, rows: null, head: null, map: null, hi: null };
 var _gaT = { rows: null, head: null, cm: null };
 var gaGate = false;  // true = 显示「选择年级」入口页（由 navigate 进入模块时置 true）
@@ -5218,14 +5221,18 @@ function gaNum(v) {
   return isNaN(n) ? null : n;
 }
 
-// 总分与缺考科目（有任一科无成绩 → 视为缺考，不计入排名）
+// 学生是否被手动标记「不计入考试成绩」：即使每科都有分，所有统计一律按缺考处理
+function gaExcl(stu) { return !!(stu && stu.excl); }
+
+// 总分与缺考科目（有任一科无成绩、或被标记「不计入考试成绩」→ 视为缺考，不计入排名）
 function gaTotalOf(stu, subjects) {
+  if (gaExcl(stu)) return { total: 0, miss: [], absent: true, excl: true };
   var t = 0, miss = [];
   for (var i = 0; i < subjects.length; i++) {
     var v = gaNum(stu.scores ? stu.scores[subjects[i]] : null);
     if (v === null) miss.push(subjects[i]); else t += v;
   }
-  return { total: t, miss: miss, absent: miss.length > 0 };
+  return { total: t, miss: miss, absent: miss.length > 0, excl: false };
 }
 
 // 年级排名表：key → {rank,total}；并列同名次（与 Excel RANK 一致）
@@ -5267,6 +5274,7 @@ function gaAvgOf(exam, cls, subj) {
   var sum = 0, n = 0;
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
+    if (gaExcl(s)) return;                    // 标记「不计入」→ 该科不参与均分
     var v = gaNum(s.scores ? s.scores[subj] : null);
     if (v === null) return;
     sum += v; n++;
@@ -5291,6 +5299,7 @@ function gaRateCount(exam, cls, subj, line) {
   var n = 0, hit = 0;
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
+    if (gaExcl(s)) return;                    // 标记「不计入」→ 该科不进优秀/合格率分母
     var v = gaNum(s.scores ? s.scores[subj] : null);
     if (v === null) return;
     n++;
@@ -5332,6 +5341,7 @@ function gaLowCount(exam, cls, subj, line) {
   var n = 0, hit = 0;
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
+    if (gaExcl(s)) return;                    // 标记「不计入」→ 该科不进低分率分母
     var v = gaNum(s.scores ? s.scores[subj] : null);
     if (v === null) return;
     n++;
@@ -5350,6 +5360,7 @@ function gaRefCount(exam, cls) {
   if (!subjects.length) return 0;            // 与分数段口径一致：没有计分科目时不统计
   return (exam.students || []).filter(function(s) {
     if (cls && s.cls !== cls) return false;
+    if (gaExcl(s)) return false;              // 标记「不计入」→ 不算参考人数（计入缺考）
     for (var i = 0; i < subjects.length; i++) {
       if (gaNum(s.scores ? s.scores[subjects[i]] : null) === null) return false;
     }
@@ -5369,6 +5380,7 @@ function gaAllPassCount(exam, cls) {
   var ref = gaRefCount(exam, cls);
   if (!list.length || !subjects.length) return { n: ref, ok: 0 };
   var ok = list.filter(function(s) {
+    if (gaExcl(s)) return false;              // 标记「不计入」→ 不参与全科合格
     for (var i = 0; i < subjects.length; i++) {
       var v = gaNum(s.scores ? s.scores[subjects[i]] : null);
       if (v === null || v < gaLine(exam, subjects[i]).pass) return false;
@@ -5772,7 +5784,7 @@ function gaRateTablesHTML(ex) {
     '<td class="ga-num"><b>' + refAll + '</b></td><td class="ga-num"><b>' + sizeAll + '</b></td>' +
     '<td class="ga-num"><b>' + (sizeAll - refAll) + '</b></td><td></td></tr>' +
     '</tbody></table></div>' +
-    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝<b>所有计分科目都有成绩</b>的学生数；<b>任意一科缺考即计入「缺考」</b>，不计入参考人数。各科优秀 / 合格 / 低分率的分母仍是「有该科成绩的人数」，该科缺考不计入。</p></div>';
+    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝<b>所有计分科目都有成绩</b>的学生数；<b>任意一科缺考即计入「缺考」</b>，不计入参考人数。在「👥 成绩名单」里被标记为<b>「不计入考试成绩」</b>的学生，即使各科都有分，也一律按缺考处理（计入缺考、不计入参考人数）。各科优秀 / 合格 / 低分率的分母仍是「有该科成绩的人数」，该科缺考或该生被标记不计入时均不计入。</p></div>';
 
   // 优秀率表
   html += '<div class="card"><div class="card-title">🏅 各科优秀率（含任课教师）</div><div class="ga-scroll">' +
@@ -5879,7 +5891,7 @@ function gaRateTablesHTML(ex) {
   html += sumRow('全科合格率', function(c) { return gaAllPassRate(ex, c); }, true, true);
   html += '</tbody></table></div>' +
     '<p class="ga-tip" style="margin:10px 0 0">总分线为各科线之和（' + TL.ex + ' / ' + TL.pass + '），低分线为合格线的一半（' + lowT +
-    '）。<b>总分统计只算参考人数</b>（所有计分科目都有成绩），有一门缺考即不计入，因此：不合格人数＝参考人数 − 合格人数。全科合格指所有计分科目均达到合格线。</p></div>';
+    '）。<b>总分统计只算参考人数</b>（所有计分科目都有成绩，且未被标记「不计入考试成绩」），有一门缺考即不计入，因此：不合格人数＝参考人数 − 合格人数。全科合格指所有计分科目均达到合格线。</p></div>';
   return html;
 }
 
@@ -5935,12 +5947,30 @@ function gaResetLines() {
 }
 
 // ---------- 分数段统计 ----------
+// 分数段设置按年级保存在 d.segCfg 里：改一次即记住，换考试、重开页面、手机同步都不会丢。
+function gaSegCfg() {
+  var d = ga();
+  var c = d.segCfg;
+  if (!c || typeof c !== 'object' || Array.isArray(c)) c = d.segCfg = {};
+  var st = Number(c.start), sp = Number(c.step), ct = Number(c.count);
+  c.start = (isFinite(st) && st >= 1) ? Math.round(st * 10) / 10 : GA_SEG_BUILTIN.start;
+  c.step = (isFinite(sp) && sp >= 1) ? Math.round(sp * 10) / 10 : GA_SEG_BUILTIN.step;
+  c.count = (isFinite(ct) && ct >= 1) ? Math.min(40, Math.max(1, Math.round(ct))) : GA_SEG_BUILTIN.count;
+  return c;
+}
+
+// 是否仍是内置默认
+function gaSegIsBuiltin() {
+  var c = gaSegCfg();
+  return c.start === GA_SEG_BUILTIN.start && c.step === GA_SEG_BUILTIN.step && c.count === GA_SEG_BUILTIN.count;
+}
+
 function gaSegThresholds() {
-  var out = [];
-  for (var i = 0; i < _gaSegCfg.count; i++) {
-    var th = _gaSegCfg.start - i * _gaSegCfg.step;
+  var cfg = gaSegCfg(), out = [];
+  for (var i = 0; i < cfg.count; i++) {
+    var th = cfg.start - i * cfg.step;
     if (th < 0) break;                       // 总分为负的段没有意义，直接截断
-    out.push(th);
+    out.push(Math.round(th * 10) / 10);
   }
   if (!out.length) out.push(0);
   return out;
@@ -5959,15 +5989,20 @@ function gaSegCount(exam, cls, th) {
 }
 
 function gaSegHTML(ex) {
+  var cfg = gaSegCfg();
   var html = '<div class="card"><div class="card-title">📶 分数段统计设置</div>' +
     '<div class="flex gap" style="flex-wrap:wrap;align-items:flex-end">' +
     '<div class="form-group" style="max-width:150px"><label>起始分（总分）</label>' +
-    '<input type="number" id="ga-seg-start" value="' + _gaSegCfg.start + '" oninput="gaSegChanged()"></div>' +
+    '<input type="number" id="ga-seg-start" value="' + cfg.start + '" oninput="gaSegChanged()"></div>' +
     '<div class="form-group" style="max-width:150px"><label>每段步长</label>' +
-    '<input type="number" id="ga-seg-step" value="' + _gaSegCfg.step + '" oninput="gaSegChanged()"></div>' +
+    '<input type="number" id="ga-seg-step" value="' + cfg.step + '" oninput="gaSegChanged()"></div>' +
     '<div class="form-group" style="max-width:150px"><label>段数</label>' +
-    '<input type="number" id="ga-seg-count" value="' + _gaSegCfg.count + '" oninput="gaSegChanged()"></div>' +
-    '</div><p class="ga-tip" style="margin:0">统计方式为“累计人数”（如 470分以上 表示总分 ≥ 470 的人数）；<b>缺考（任缺一科）与全科缺考的学生一律不计入</b>，统计口径与「参考人数」完全一致。修改后即时重算。</p></div>';
+    '<input type="number" id="ga-seg-count" value="' + cfg.count + '" oninput="gaSegChanged()"></div>' +
+    '</div>' +
+    '<div style="margin:10px 0 0"><button class="btn btn-default btn-sm" onclick="gaSegResetDefault()">↺ 恢复内置默认（' +
+      GA_SEG_BUILTIN.start + ' 起 / 每 ' + GA_SEG_BUILTIN.step + ' 分 / ' + GA_SEG_BUILTIN.count + ' 段）</button></div>' +
+    '<p class="ga-tip" style="margin:8px 0 0">统计方式为“累计人数”（如 470分以上 表示总分 ≥ 470 的人数）；<b>缺考（任缺一科）与标记为「不计入考试成绩」的学生一律不计入</b>，统计口径与「参考人数」完全一致。</p>' +
+    '<p class="ga-tip" style="margin:6px 0 0" id="ga-seg-note">' + gaSegNoteHTML() + '</p></div>';
   html += '<div id="ga-seg-table">' + gaSegTableHTML(ex) + '</div>';
   return html;
 }
@@ -5994,21 +6029,47 @@ function gaSegTableHTML(ex) {
   html += '<td class="ga-num"><b>' + gaRefCount(ex, '') + '</b></td>' +
     '<td class="ga-num"><b>' + gaMissCount(ex, '') + '</b></td></tr>';
   html += '</tbody></table></div>' +
-    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝全部计分科目都有成绩的人数；<b>任缺一科即计入缺考</b>。' +
-    '缺考学生<b>不进入任何分数段</b>，也不参与总分排名与总分各项统计；' +
+    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝全部计分科目都有成绩的人数；<b>任缺一科即计入缺考</b>，被标记<b>「不计入考试成绩」</b>的学生同样按缺考处理。' +
+    '缺考与被标记不计入的学生<b>不进入任何分数段</b>，也不参与总分排名与总分各项统计；' +
     '最低一段的人数应等于该行的参考人数（名单人数 − 缺考）。</p></div>';
   return html;
+}
+
+var _gaSegSaveTimer = null;
+
+function gaSegNoteHTML() {
+  var cfg = gaSegCfg();
+  return (gaSegIsBuiltin() ? '当前为<b>内置默认</b>：' : '当前为<b>自定义设置</b>：') +
+    cfg.start + ' 分起、每 ' + cfg.step + ' 分一段、共 ' + cfg.count + ' 段。' +
+    '设置<b>按「' + esc(jwActiveName()) + '」这个年级自动记住</b>，改完即时生效并保存，换考试或重开页面都不用重新设。';
 }
 
 function gaSegChanged() {
   var ex = gaCurExam();
   if (!ex) return;
   var a = el('ga-seg-start'), b = el('ga-seg-step'), c = el('ga-seg-count');
-  _gaSegCfg.start = Number(a && a.value) || 0;
-  _gaSegCfg.step = Math.max(1, Number(b && b.value) || 10);
-  _gaSegCfg.count = Math.min(40, Math.max(1, Number(c && c.value) || 20));
+  var cfg = gaSegCfg();
+  var sv = Number(a && a.value), pv = Number(b && b.value), cv = Number(c && c.value);
+  // 空值 / 非法值不覆盖已保存的设置（用户清空重输时，配置不会被写成空）
+  if (isFinite(sv) && sv >= 1) cfg.start = Math.round(sv * 10) / 10;
+  if (isFinite(pv) && pv >= 1) cfg.step = Math.round(pv * 10) / 10;
+  if (isFinite(cv) && cv >= 1) cfg.count = Math.min(40, Math.max(1, Math.round(cv)));
+
   var box = el('ga-seg-table');
   if (box) box.innerHTML = gaSegTableHTML(ex);
+  var note = el('ga-seg-note');
+  if (note) note.innerHTML = gaSegNoteHTML();
+
+  // 防抖保存：连续输入时只在停手 600ms 后落盘一次
+  if (_gaSegSaveTimer) clearTimeout(_gaSegSaveTimer);
+  _gaSegSaveTimer = setTimeout(function() { _gaSegSaveTimer = null; save(); }, 600);
+}
+
+function gaSegResetDefault() {
+  var d = ga();
+  d.segCfg = { start: GA_SEG_BUILTIN.start, step: GA_SEG_BUILTIN.step, count: GA_SEG_BUILTIN.count };
+  save(); renderPage();
+  toast('已恢复内置分数段：' + GA_SEG_BUILTIN.start + ' 起 / 每 ' + GA_SEG_BUILTIN.step + ' 分 / 共 ' + GA_SEG_BUILTIN.count + ' 段');
 }
 
 // ---------- 成绩名单（表格内可直接编辑） ----------
@@ -6023,7 +6084,7 @@ function gaRosterHTML(ex) {
     '<input class="ga-inp" style="max-width:220px" placeholder="按姓名 / 考试号搜索" value="' + esc(_gaRosterKw) + '" oninput="gaRosterSearch(this.value)">' +
     '<button class="btn btn-default btn-sm" onclick="gaRosterAdd()">＋ 添加学生</button>' +
     '<button class="btn btn-default btn-sm" onclick="gaExportCSV()">⬇ 导出成绩表 CSV</button>' +
-    '<span class="ga-tip">姓名 / 班级 / 考试号 / 各科成绩均可直接修改，改完点空白处即保存并重算名次；<b>单击任一科目列头</b>可按该科成绩从高到低排序</span></div>' +
+    '<span class="ga-tip">姓名 / 班级 / 考试号 / 各科成绩均可直接修改，改完点空白处即保存并重算名次；<b>单击任一科目列头</b>可按该科成绩从高到低排序。状态列可点<b>「⊘ 不计入」</b>把该生标为<b>不计入考试成绩</b>：分数照旧保留，但均分、率、排名、分数段、参考人数等<b>所有统计一律按缺考处理</b></span></div>' +
     '<div id="ga-roster-table">' + gaRosterTableHTML(ex) + '</div></div>';
   return html;
 }
@@ -6047,8 +6108,8 @@ function gaRosterTableHTML(ex) {
   var sk = _gaRosterSort.key, sd = Number(_gaRosterSort.dir) || 0;
   if (sk && sd && allSubs.indexOf(sk) >= 0) {
     list.sort(function(a, b) {
-      var va = gaNum(a.scores ? a.scores[sk] : null);
-      var vb = gaNum(b.scores ? b.scores[sk] : null);
+      var va = gaExcl(a) ? null : gaNum(a.scores ? a.scores[sk] : null);
+      var vb = gaExcl(b) ? null : gaNum(b.scores ? b.scores[sk] : null);
       if (va === null && vb === null) return byRank(a, b);
       if (va === null) return 1;
       if (vb === null) return -1;
@@ -6083,7 +6144,7 @@ function gaRosterTableHTML(ex) {
   html += '<th>总分</th><th>进步率</th><th>状态</th><th>操作</th></tr></thead><tbody>';
   list.forEach(function(s) {
     var r = gaTotalOf(s, counted), rkm = rk[gaStuKey(s)], prog = gaProgress(ex, s);
-    html += '<tr><td class="ga-num">' + (rkm ? '<span class="badge" style="background:var(--primary-light);color:var(--primary-dark)">' + rkm.rank + '</span>' : '—') + '</td>' +
+    html += '<tr' + (s.excl ? ' class="ga-excl-row"' : '') + '><td class="ga-num">' + (rkm ? '<span class="badge" style="background:var(--primary-light);color:var(--primary-dark)">' + rkm.rank + '</span>' : '—') + '</td>' +
       '<td><input class="ga-inp ga-l" style="min-width:82px" value="' + esc(s.name) + '" onchange="gaRosterEdit(' + s.id + ',\'name\',this.value)"></td>' +
       '<td><input class="ga-inp" style="min-width:64px" value="' + esc(s.cls || '') + '" onchange="gaRosterEdit(' + s.id + ',\'cls\',this.value)"></td>' +
       '<td><input class="ga-inp" style="min-width:76px" value="' + esc(s.no || '') + '" onchange="gaRosterEdit(' + s.id + ',\'no\',this.value)"></td>';
@@ -6099,12 +6160,39 @@ function gaRosterTableHTML(ex) {
     else if (prog > 0) html += '<td class="ga-num ga-up">↑ ' + (prog * 100).toFixed(1) + '%</td>';
     else if (prog < 0) html += '<td class="ga-num ga-down">↓ ' + (Math.abs(prog) * 100).toFixed(1) + '%</td>';
     else html += '<td class="ga-num ga-flat">持平</td>';
-    html += '<td>' + (r.absent ? '<span class="ga-absent">缺考 ' + esc(r.miss.join('/')) + '</span>'
-      : '<span class="badge" style="background:#d1fae5;color:#065f46">正常</span>') + '</td>' +
-      '<td><button class="btn btn-danger btn-sm" onclick="gaRosterDel(' + s.id + ')">删除</button></td></tr>';
+    html += '<td>' + gaRosterStatusHTML(s, r) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn btn-default btn-sm" onclick="gaRosterToggleExcl(' + s.id + ')" title="' +
+          (s.excl ? '恢复为正常统计' : '分数保留，但所有统计按缺考处理') + '">' +
+          (s.excl ? '↩ 恢复计入' : '⊘ 不计入') + '</button> ' +
+        '<button class="btn btn-danger btn-sm" onclick="gaRosterDel(' + s.id + ')">删除</button></td></tr>';
   });
   html += '</tbody></table></div>';
   return html;
+}
+
+// 名单状态徽章：正常 / 缺考（列出缺哪几科）/ 不计入考试成绩（手动标记）
+function gaRosterStatusHTML(s, r) {
+  if (s.excl) return '<span class="badge" style="background:#ede9fe;color:#5b21b6" title="分数保留，但不参与任何统计">不计入考试成绩</span>';
+  if (r.absent) return '<span class="ga-absent">缺考 ' + esc(r.miss.join('/')) + '</span>';
+  return '<span class="badge" style="background:#d1fae5;color:#065f46">正常</span>';
+}
+
+// 手动切换「不计入考试成绩」：分数不动，只改统计口径
+function gaRosterToggleExcl(stuId) {
+  var ex = gaCurExam();
+  if (!ex) return;
+  var stu = null;
+  (ex.students || []).forEach(function(s) { if (s.id === stuId) stu = s; });
+  if (!stu) return;
+  stu.excl = !stu.excl;
+  _gaRankCache = {};
+  save();
+  var box = el('ga-roster-table');
+  if (box) box.innerHTML = gaRosterTableHTML(ex);
+  toast(stu.excl
+    ? '「' + (stu.name || '该生') + '」已标记为不计入考试成绩：分数保留，所有统计按缺考处理'
+    : '「' + (stu.name || '该生') + '」已恢复计入考试成绩');
 }
 
 function gaRosterSearch(v) {
@@ -7123,7 +7211,7 @@ function gaExportCSV() {
   var ex = gaCurExam();
   if (!ex) { toast('当前没有可导出的考试', 'error'); return; }
   var subs = gaSubjects(), rk = gaRankMapCached(ex), counted = gaCountedSubjects(ex);
-  var lines = ['姓名,班级,考试号,' + subs.join(',') + ',总分,年级排名,进步率'];
+  var lines = ['姓名,班级,考试号,' + subs.join(',') + ',总分,年级排名,进步率,状态'];
   (ex.students || []).forEach(function(s) {
     var r = gaTotalOf(s, counted), rkm = rk[gaStuKey(s)], prog = gaProgress(ex, s);
     var row = [s.name, s.cls, s.no || ''];
@@ -7131,6 +7219,7 @@ function gaExportCSV() {
     row.push(r.absent ? '' : r.total);
     row.push(rkm ? rkm.rank : '');
     row.push(prog === null ? '' : (prog * 100).toFixed(2) + '%');
+    row.push(s.excl ? '不计入考试成绩' : (r.absent ? '缺考 ' + r.miss.join('/') : '正常'));
     lines.push(row.map(function(x) { return '"' + String(x).replace(/"/g, '""') + '"'; }).join(','));
   });
   var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -7478,6 +7567,7 @@ function xaTeacherSheet() {
 }
 
 function xaStuAllPass(ex, stu, subjects) {
+  if (gaExcl(stu)) return 0;                  // 标记「不计入」→ 全科合格不计
   for (var i = 0; i < subjects.length; i++) {
     var v = gaNum(stu.scores ? stu.scores[subjects[i]] : null);
     if (v === null || v < gaLine(ex, subjects[i]).pass) return 0;
@@ -7518,7 +7608,7 @@ function xaRosterSheet(ex) {
     row.push({ v: rkm ? rkm.rank : '', s: 'i' });
     row.push({ v: prog === null ? '' : Math.round(prog * 10000) / 10000, s: 'p' });
     row.push({ v: xaStuAllPass(ex, s, counted), s: 'i' });
-    row.push({ v: r.absent ? ('缺考 ' + r.miss.join('/')) : '正常', s: r.absent ? 'off' : 't' });
+    row.push({ v: s.excl ? '不计入考试成绩' : (r.absent ? ('缺考 ' + r.miss.join('/')) : '正常'), s: r.absent ? 'off' : 't' });
     rows.push(row);
   });
   return xaSheet('学生名单', cols, rows, { freeze: 1 });
@@ -7553,7 +7643,7 @@ function xaRankSheet(ex) {
     row.push({ v: r.absent ? '' : xaRound(r.total), s: r.absent ? 'off' : 'n' });
     row.push({ v: rkm ? rkm.rank : '', s: 'i' });
     row.push({ v: prog === null ? '' : Math.round(prog * 10000) / 10000, s: 'p' });
-    row.push({ v: r.absent ? ('缺考 ' + r.miss.join('/')) : '正常', s: r.absent ? 'off' : 't' });
+    row.push({ v: s.excl ? '不计入考试成绩' : (r.absent ? ('缺考 ' + r.miss.join('/')) : '正常'), s: r.absent ? 'off' : 't' });
     rows.push(row);
   });
   return xaSheet('成绩排名', cols, rows, { freeze: 1 });
