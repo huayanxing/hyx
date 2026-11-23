@@ -746,6 +746,8 @@ details.fhelp summary { cursor: pointer; color: var(--primary); font-weight: 600
 .ga-sortbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 6px 10px; font-size: 12px; color: var(--primary-dark); background: var(--primary-light); border: 1px solid #bfdbfe; border-radius: 8px; }
 .ga-sortbar button { margin-left: auto; border: 1px solid #93c5fd; background: #fff; color: var(--primary-dark); font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer; font-family: inherit; }
 .ga-sortbar button:hover { background: var(--primary); border-color: var(--primary); color: #fff; }
+.ga-lowsub { display: block; font-weight: 400; font-size: 10px; color: var(--text-l); }
+.ga-lowcnt { display: block; font-size: 10px; color: var(--text-l); }
 /* 按科目删除单场考试成绩 */
 .ga-subdel { display: flex; flex-wrap: wrap; gap: 8px; }
 .ga-subdelitem { display: flex; align-items: center; gap: 7px; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px 5px 10px; font-size: 12px; }
@@ -5285,7 +5287,7 @@ function gaTotalAvgOf(exam, cls) {
 }
 
 // 优秀率 / 合格率：分母为“有该科成绩的人数”（缺考不计入）
-function gaRateOf(exam, cls, subj, line) {
+function gaRateCount(exam, cls, subj, line) {
   var n = 0, hit = 0;
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
@@ -5294,11 +5296,15 @@ function gaRateOf(exam, cls, subj, line) {
     n++;
     if (v >= line) hit++;
   });
-  return n ? hit / n : null;
+  return { n: n, hit: hit };
+}
+function gaRateOf(exam, cls, subj, line) {
+  var c = gaRateCount(exam, cls, subj, line);
+  return c.n ? c.hit / c.n : null;
 }
 
 // 总分优秀率 / 合格率（只统计未缺考学生）
-function gaTotalRateOf(exam, cls, line) {
+function gaTotalCount(exam, cls, line) {
   var n = 0, hit = 0, subjects = gaCountedSubjects(exam);
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
@@ -5307,15 +5313,61 @@ function gaTotalRateOf(exam, cls, line) {
     n++;
     if (r.total >= line) hit++;
   });
-  return n ? hit / n : null;
+  return { n: n, hit: hit };
+}
+function gaTotalRateOf(exam, cls, line) {
+  var c = gaTotalCount(exam, cls, line);
+  return c.n ? c.hit / c.n : null;
 }
 
-// 全科合格率：所有科目均达到合格线的人数 / 班级人数
-function gaAllPassRate(exam, cls) {
+// 低分线 = 合格线的 50%（如合格 96 → 低分 48；合格 75 → 低分 37.5）
+function gaLowLine(pass) {
+  var v = Number(pass);
+  if (!isFinite(v)) return 0;
+  return Math.round(v * 50) / 100;
+}
+
+// 低分：严格低于低分线（缺考不计入分母）
+function gaLowCount(exam, cls, subj, line) {
+  var n = 0, hit = 0;
+  (exam.students || []).forEach(function(s) {
+    if (cls && s.cls !== cls) return;
+    var v = gaNum(s.scores ? s.scores[subj] : null);
+    if (v === null) return;
+    n++;
+    if (v < line) hit++;
+  });
+  return { n: n, hit: hit };
+}
+function gaLowRateOf(exam, cls, subj, line) {
+  var c = gaLowCount(exam, cls, subj, line);
+  return c.n ? c.hit / c.n : null;
+}
+
+// 参考人数：所有计分科目都有成绩的学生；任意一科缺考即算缺考
+function gaRefCount(exam, cls) {
+  var subjects = gaCountedSubjects(exam);
+  if (!subjects.length) return 0;            // 与分数段口径一致：没有计分科目时不统计
+  return (exam.students || []).filter(function(s) {
+    if (cls && s.cls !== cls) return false;
+    for (var i = 0; i < subjects.length; i++) {
+      if (gaNum(s.scores ? s.scores[subjects[i]] : null) === null) return false;
+    }
+    return true;
+  }).length;
+}
+
+// 缺考人数 = 名单人数 − 参考人数（任缺一科即计入）
+function gaMissCount(exam, cls) {
+  return gaClassSize(exam, cls) - gaRefCount(exam, cls);
+}
+
+// 全科合格率：所有科目均达到合格线的人数 / 参考人数（有一门缺考就不在参考人数里）
+function gaAllPassCount(exam, cls) {
   var subjects = gaCountedSubjects(exam);
   var list = (exam.students || []).filter(function(s) { return !cls || s.cls === cls; });
-  if (!list.length) return null;
-  if (!subjects.length) return null;
+  var ref = gaRefCount(exam, cls);
+  if (!list.length || !subjects.length) return { n: ref, ok: 0 };
   var ok = list.filter(function(s) {
     for (var i = 0; i < subjects.length; i++) {
       var v = gaNum(s.scores ? s.scores[subjects[i]] : null);
@@ -5323,7 +5375,11 @@ function gaAllPassRate(exam, cls) {
     }
     return true;
   }).length;
-  return ok / list.length;
+  return { n: ref, ok: ok };
+}
+function gaAllPassRate(exam, cls) {
+  var c = gaAllPassCount(exam, cls);
+  return c.n ? c.ok / c.n : null;
 }
 
 function gaClassSize(exam, cls) {
@@ -5613,9 +5669,9 @@ function gaStatCard(icon, val, label, color) {
 function gaAvgHTML(ex) {
   var subs = gaSubjects(), classes = gaClasses(), st = gaStat(ex);
   var html = '<div class="stat-grid">' +
-    gaStatCard('👥', st.total, '参考人数', 'var(--primary)') +
-    gaStatCard('✅', st.ranked, '参与排名', 'var(--success)') +
-    gaStatCard('⚠️', st.absent, '缺考（不排名）', 'var(--warning)') +
+    gaStatCard('👥', st.total, '名单人数', 'var(--primary)') +
+    gaStatCard('✅', st.ranked, '参考人数（无缺考）', 'var(--success)') +
+    gaStatCard('⚠️', st.absent, '缺考（不参与总分统计）', 'var(--warning)') +
     gaStatCard('📊', gaFmtNum(st.avg), '年级总均分', 'var(--info)') +
     gaStatCard('🔝', st.max, '最高分', 'var(--danger)') +
     gaStatCard('🔻', st.min, '最低分', 'var(--text-l)') +
@@ -5702,6 +5758,22 @@ function gaRateTablesHTML(ex) {
   var TL = gaLine(ex, GA_TOTAL);
   var html = '';
 
+  // 参考人数（全科都有分才算参考，任缺一科即算缺考）
+  html += '<div class="card"><div class="card-title">👥 各班参考人数</div><div class="ga-scroll">' +
+    '<table class="ga-tbl"><thead><tr><th class="ga-sticky">班级</th><th>参考人数</th><th>名单人数</th><th>缺考</th><th>班主任</th></tr></thead><tbody>';
+  classes.forEach(function(cls) {
+    var ref = gaRefCount(ex, cls), size = gaClassSize(ex, cls);
+    html += '<tr><td class="ga-sticky"><b>' + esc(cls) + '</b></td>' +
+      '<td class="ga-num">' + ref + '</td><td class="ga-num">' + size + '</td>' +
+      '<td class="ga-num">' + (size - ref) + '</td><td>' + esc(gaTeacherName(cls, '班主任')) + '</td></tr>';
+  });
+  var refAll = gaRefCount(ex, ''), sizeAll = gaClassSize(ex, '');
+  html += '<tr style="background:#f9fafb"><td class="ga-sticky"><b>年级合计</b></td>' +
+    '<td class="ga-num"><b>' + refAll + '</b></td><td class="ga-num"><b>' + sizeAll + '</b></td>' +
+    '<td class="ga-num"><b>' + (sizeAll - refAll) + '</b></td><td></td></tr>' +
+    '</tbody></table></div>' +
+    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝<b>所有计分科目都有成绩</b>的学生数；<b>任意一科缺考即计入「缺考」</b>，不计入参考人数。各科优秀 / 合格 / 低分率的分母仍是「有该科成绩的人数」，该科缺考不计入。</p></div>';
+
   // 优秀率表
   html += '<div class="card"><div class="card-title">🏅 各科优秀率（含任课教师）</div><div class="ga-scroll">' +
     '<table class="ga-tbl"><thead><tr><th class="ga-sticky">班级</th>';
@@ -5745,7 +5817,69 @@ function gaRateTablesHTML(ex) {
   html += '<td class="ga-num"><b>' + gaFmtRate(gaTotalRateOf(ex, '', TL.pass)) + '</b></td>' +
     '<td class="ga-num"><b>' + gaFmtRate(gaAllPassRate(ex, '')) + '</b></td><td></td></tr>' +
     '</tbody></table></div>' +
-    '<p class="ga-tip" style="margin:10px 0 0">口径：分母为“有该科成绩的人数”，缺考不计入；全科合格率指所有科目均达到合格线的人数占班级人数的比例。</p></div>';
+    '<p class="ga-tip" style="margin:10px 0 0">口径：各科率的分母为“<b>有该科成绩的人数</b>”，该科缺考不计入；全科合格率＝所有科目均达到合格线的人数 ÷ <b>参考人数</b>（所有计分科目都有成绩的人数）。</p></div>';
+
+  // 低分率（低分线 = 合格线 × 50%）
+  var lowT = gaLowLine(TL.pass);
+  html += '<div class="card"><div class="card-title">⬇ 各科低分率（低于合格线的 50%）</div><div class="ga-scroll">' +
+    '<table class="ga-tbl"><thead><tr><th class="ga-sticky">班级</th>';
+  subs.forEach(function(s) {
+    html += '<th>' + esc(s) + '<span class="ga-lowsub">＜' + gaLowLine(gaLine(ex, s).pass) + '分</span></th>';
+  });
+  html += '<th>总分<span class="ga-lowsub">＜' + lowT + '分</span></th></tr></thead><tbody>';
+  classes.forEach(function(cls) {
+    html += '<tr><td class="ga-sticky"><b>' + esc(cls) + '</b></td>';
+    subs.forEach(function(s) {
+      var low = gaLowLine(gaLine(ex, s).pass), c = gaLowCount(ex, cls, s, low);
+      html += '<td class="ga-num">' + gaFmtRate(c.n ? c.hit / c.n : null) +
+        (c.hit ? '<span class="ga-lowcnt">' + c.hit + ' 人</span>' : '') + '</td>';
+    });
+    var tc = gaTotalCount(ex, cls, lowT), lowN = tc.n - tc.hit;
+    html += '<td class="ga-num"><b>' + gaFmtRate(tc.n ? lowN / tc.n : null) + '</b>' +
+      (lowN ? '<span class="ga-lowcnt">' + lowN + ' 人</span>' : '') + '</td></tr>';
+  });
+  html += '<tr style="background:#f9fafb"><td class="ga-sticky"><b>年级</b></td>';
+  subs.forEach(function(s) {
+    var low = gaLowLine(gaLine(ex, s).pass), c = gaLowCount(ex, '', s, low);
+    html += '<td class="ga-num"><b>' + gaFmtRate(c.n ? c.hit / c.n : null) + '</b>' +
+      (c.hit ? '<span class="ga-lowcnt">' + c.hit + ' 人</span>' : '') + '</td>';
+  });
+  var tcAll = gaTotalCount(ex, '', lowT), lowAll = tcAll.n - tcAll.hit;
+  html += '<td class="ga-num"><b>' + gaFmtRate(tcAll.n ? lowAll / tcAll.n : null) + '</b>' +
+    (lowAll ? '<span class="ga-lowcnt">' + lowAll + ' 人</span>' : '') + '</td></tr>' +
+    '</tbody></table></div>' +
+    '<p class="ga-tip" style="margin:10px 0 0">低分线＝合格线 × 50%（四舍五入到 0.5 分）：语文 96→48、数学 96→48；总分随各科合格线自动累加后再取半。低于该线即计入低分，缺考不计入分母。</p></div>';
+
+  // 班级总表（对照学校质量分析第二页）
+  html += '<div class="card"><div class="card-title">📋 班级总表（优秀 / 合格 / 低分 / 全科合格）</div><div class="ga-scroll">' +
+    '<table class="ga-tbl"><thead><tr><th class="ga-sticky">项目</th>';
+  classes.forEach(function(c) { html += '<th>' + esc(c) + '</th>'; });
+  html += '<th>年级合计</th></tr></thead><tbody>';
+
+  function sumRow(label, fn, isRate, hl) {
+    var tag = hl ? ' style="background:#f9fafb"' : '';
+    var cell = hl ? (function(x) { return '<b>' + x + '</b>'; }) : (function(x) { return x; });
+    var out = '<tr' + tag + '><td class="ga-sticky">' + cell(label) + '</td>';
+    classes.concat(['']).forEach(function(c) {
+      var v = fn(c);
+      var txt = isRate ? gaFmtRate(v) : (v === null || v === undefined ? '—' : String(v));
+      out += '<td class="ga-num">' + cell(txt) + '</td>';
+    });
+    return out + '</tr>';
+  }
+  html += sumRow('参考人数', function(c) { return gaRefCount(ex, c); });
+  html += sumRow(TL.ex + ' 以上优秀人数', function(c) { return gaTotalCount(ex, c, TL.ex).hit; });
+  html += sumRow('总分优秀率', function(c) { return gaTotalRateOf(ex, c, TL.ex); }, true);
+  html += sumRow(TL.pass + ' 以上合格人数', function(c) { return gaTotalCount(ex, c, TL.pass).hit; });
+  html += sumRow(TL.pass + ' 以下不合格人数', function(c) { var t = gaTotalCount(ex, c, TL.pass); return t.n - t.hit; });
+  html += sumRow('总分合格率', function(c) { return gaTotalRateOf(ex, c, TL.pass); }, true);
+  html += sumRow(lowT + ' 以下低分人数', function(c) { var t = gaTotalCount(ex, c, lowT); return t.n - t.hit; });
+  html += sumRow('总分低分率', function(c) { var t = gaTotalCount(ex, c, lowT); return t.n ? (t.n - t.hit) / t.n : null; }, true);
+  html += sumRow('全科合格人数', function(c) { return gaAllPassCount(ex, c).ok; });
+  html += sumRow('全科合格率', function(c) { return gaAllPassRate(ex, c); }, true, true);
+  html += '</tbody></table></div>' +
+    '<p class="ga-tip" style="margin:10px 0 0">总分线为各科线之和（' + TL.ex + ' / ' + TL.pass + '），低分线为合格线的一半（' + lowT +
+    '）。<b>总分统计只算参考人数</b>（所有计分科目都有成绩），有一门缺考即不计入，因此：不合格人数＝参考人数 − 合格人数。全科合格指所有计分科目均达到合格线。</p></div>';
   return html;
 }
 
@@ -5803,16 +5937,22 @@ function gaResetLines() {
 // ---------- 分数段统计 ----------
 function gaSegThresholds() {
   var out = [];
-  for (var i = 0; i < _gaSegCfg.count; i++) out.push(_gaSegCfg.start - i * _gaSegCfg.step);
+  for (var i = 0; i < _gaSegCfg.count; i++) {
+    var th = _gaSegCfg.start - i * _gaSegCfg.step;
+    if (th < 0) break;                       // 总分为负的段没有意义，直接截断
+    out.push(th);
+  }
+  if (!out.length) out.push(0);
   return out;
 }
 
 function gaSegCount(exam, cls, th) {
   var subjects = gaCountedSubjects(exam), n = 0;
+  if (!subjects.length) return 0;            // 没有计分科目时不统计，避免把全员算成 0 分
   (exam.students || []).forEach(function(s) {
     if (cls && s.cls !== cls) return;
     var r = gaTotalOf(s, subjects);
-    if (r.absent) return;
+    if (r.absent) return;                    // 任缺一科即缺考，不进入任何分数段
     if (r.total >= th) n++;
   });
   return n;
@@ -5827,7 +5967,7 @@ function gaSegHTML(ex) {
     '<input type="number" id="ga-seg-step" value="' + _gaSegCfg.step + '" oninput="gaSegChanged()"></div>' +
     '<div class="form-group" style="max-width:150px"><label>段数</label>' +
     '<input type="number" id="ga-seg-count" value="' + _gaSegCfg.count + '" oninput="gaSegChanged()"></div>' +
-    '</div><p class="ga-tip" style="margin:0">统计方式为“累计人数”（如 470分以上 表示总分 ≥ 470 的人数），缺考学生不计入。修改后即时重算。</p></div>';
+    '</div><p class="ga-tip" style="margin:0">统计方式为“累计人数”（如 470分以上 表示总分 ≥ 470 的人数）；<b>缺考（任缺一科）与全科缺考的学生一律不计入</b>，统计口径与「参考人数」完全一致。修改后即时重算。</p></div>';
   html += '<div id="ga-seg-table">' + gaSegTableHTML(ex) + '</div>';
   return html;
 }
@@ -5838,19 +5978,25 @@ function gaSegTableHTML(ex) {
   var html = '<div class="card"><div class="card-title">📶 总分分数段人数统计（累计）</div><div class="ga-scroll">' +
     '<table class="ga-tbl"><thead><tr><th class="ga-sticky">班级</th>';
   cols.forEach(function(t) { html += '<th>' + t + '分以上</th>'; });
-  html += '<th>班级人数</th></tr></thead><tbody>';
+  html += '<th title="全部计分科目都有成绩的人数（缺考不计）">参考人数</th>' +
+    '<th title="名单人数 − 参考人数，任缺一科即计入">缺考</th></tr></thead><tbody>';
   classes.forEach(function(cls) {
     html += '<tr><td class="ga-sticky"><b>' + esc(cls) + '</b></td>';
     cols.forEach(function(t) {
       var n = gaSegCount(ex, cls, t);
       html += '<td class="ga-num">' + (n ? n : '<span class="ga-flat">0</span>') + '</td>';
     });
-    html += '<td class="ga-num"><b>' + gaClassSize(ex, cls) + '</b></td></tr>';
+    html += '<td class="ga-num"><b>' + gaRefCount(ex, cls) + '</b></td>' +
+      '<td class="ga-num">' + (gaMissCount(ex, cls) || '<span class="ga-flat">0</span>') + '</td></tr>';
   });
   html += '<tr style="background:#f9fafb"><td class="ga-sticky"><b>全校</b></td>';
   cols.forEach(function(t) { html += '<td class="ga-num"><b>' + gaSegCount(ex, '', t) + '</b></td>'; });
-  html += '<td class="ga-num"><b>' + gaClassSize(ex, '') + '</b></td></tr>';
-  html += '</tbody></table></div></div>';
+  html += '<td class="ga-num"><b>' + gaRefCount(ex, '') + '</b></td>' +
+    '<td class="ga-num"><b>' + gaMissCount(ex, '') + '</b></td></tr>';
+  html += '</tbody></table></div>' +
+    '<p class="ga-tip" style="margin:10px 0 0">参考人数＝全部计分科目都有成绩的人数；<b>任缺一科即计入缺考</b>。' +
+    '缺考学生<b>不进入任何分数段</b>，也不参与总分排名与总分各项统计；' +
+    '最低一段的人数应等于该行的参考人数（名单人数 − 缺考）。</p></div>';
   return html;
 }
 
@@ -7000,7 +7146,7 @@ function gaExportCSV() {
 //  按《期末考试质量分析 2026.06.xlsx》的版式生成真正的 .xlsx
 //  纯前端实现：OOXML + ZIP(STORE)，零外部依赖
 // ============================================================
-var XA_STY = { d: 0, h: 1, t: 2, n: 3, p: 4, i: 5, title: 6, l: 7, bt: 8, bn: 9, bp: 10, bi: 11, off: 12, up: 13, dn: 14 };
+var XA_STY = { d: 0, h: 1, t: 2, n: 3, p: 4, i: 5, title: 6, l: 7, bt: 8, bn: 9, bp: 10, bi: 11, off: 12, up: 13, dn: 14, sb: 15 };
 
 function xaColName(n) {
   var s = '';
@@ -7152,7 +7298,8 @@ function xaStylesXml() {
     xf(0, 1, 3, 1, C),                                          // 11 汇总整数
     xf(0, 3, 0, 1, C),                                          // 12 灰色（缺考/无效）
     xf(164, 4, 0, 1, C),                                        // 13 红色 + 两位小数（进步）
-    xf(164, 5, 0, 1, C)                                         // 14 绿色 + 两位小数（退步）
+    xf(164, 5, 0, 1, C),                                        // 14 绿色 + 两位小数（退步）
+    xf(0, 1, 0, 1, C + ' wrapText="1"')                         // 15 加粗文本（分科标签）
   ];
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
@@ -7302,6 +7449,11 @@ function xaBuildXlsx(sheets) {
 function xaRound(v) {
   if (v === null || v === undefined || v === '' || typeof v !== 'number' || !isFinite(v)) return '';
   return Math.round(v * 100) / 100;
+}
+// 百分比：保留 4 位小数（0.2857 → 单元格显示 28.57%），与工作台两位小数百分比完全一致
+function xaPct(v) {
+  if (v === null || v === undefined || v === '' || typeof v !== 'number' || !isFinite(v)) return '';
+  return Math.round(v * 10000) / 10000;
 }
 function xaInt(v) { return (v === null || v === undefined || v === '') ? '' : v; }
 function xaSheet(name, cols, rows, opt) {
@@ -7499,10 +7651,10 @@ function xaRateSheet(ex, kind) {
     subs.forEach(function(s) {
       var L = gaLine(ex, s);
       var v = gaRateOf(ex, c, s, isPass ? L.pass : L.ex);
-      r.push({ v: xaRound(v), s: 'p' }, { v: gaTeacherName(c, s), s: 't' });
+      r.push({ v: xaPct(v), s: 'p' }, { v: gaTeacherName(c, s), s: 't' });
     });
-    r.push({ v: xaRound(gaTotalRateOf(ex, c, isPass ? TL.pass : TL.ex)), s: 'p' });
-    if (isPass) r.push({ v: xaRound(gaAllPassRate(ex, c)), s: 'p' });
+    r.push({ v: xaPct(gaTotalRateOf(ex, c, isPass ? TL.pass : TL.ex)), s: 'p' });
+    if (isPass) r.push({ v: xaPct(gaAllPassRate(ex, c)), s: 'p' });
     r.push({ v: gaTeacherName(c, '班主任'), s: 't' });
     rows.push(r);
   });
@@ -7510,37 +7662,120 @@ function xaRateSheet(ex, kind) {
   var sr = [{ v: isPass ? '全校合格率' : '全校优秀率', s: 'bt' }];
   subs.forEach(function(s) {
     var L = gaLine(ex, s);
-    sr.push({ v: xaRound(gaRateOf(ex, '', s, isPass ? L.pass : L.ex)), s: 'bp' }, { v: '', s: 'bt' });
+    sr.push({ v: xaPct(gaRateOf(ex, '', s, isPass ? L.pass : L.ex)), s: 'bp' }, { v: '', s: 'bt' });
   });
-  sr.push({ v: xaRound(gaTotalRateOf(ex, '', isPass ? TL.pass : TL.ex)), s: 'bp' });
-  if (isPass) sr.push({ v: xaRound(gaAllPassRate(ex, '')), s: 'bp' });
+  sr.push({ v: xaPct(gaTotalRateOf(ex, '', isPass ? TL.pass : TL.ex)), s: 'bp' });
+  if (isPass) sr.push({ v: xaPct(gaAllPassRate(ex, '')), s: 'bp' });
   sr.push({ v: '', s: 'bt' });
   rows.push(sr);
 
   return xaSheet(isPass ? '各科合格率' : '各科优秀率', cols, rows, { freeze: 1 });
 }
 
+// 学校质量分析模板 · 第一页：分科人数 / 率（按班横向）
+// 行：参考人数 → 每科「优秀人数 / 优秀率 / 及格人数 / 及格率」
+function xaRateDocSheet(ex) {
+  var subs = gaSubjects(), cls = gaClasses(), gn = jwActiveName();
+  var cols = [9, 13];
+  cls.forEach(function() { cols.push(9); });
+  cols.push(9);
+
+  var head = [{ v: '', s: 'h' }, { v: '', s: 'h' }];
+  cls.forEach(function(c) { head.push({ v: (gn ? gn + '/' : '') + c, s: 'h' }); });
+  head.push({ v: '年级', s: 'h' });
+  var rows = [head];
+
+  var refRow = [{ v: '', s: 't' }, { v: '参考人数', s: 't' }];
+  cls.forEach(function(c) { refRow.push({ v: gaRefCount(ex, c), s: 'i' }); });
+  refRow.push({ v: gaRefCount(ex, ''), s: 'bi' });
+  rows.push(refRow);
+
+  var merges = [];
+  subs.forEach(function(sub) {
+    var L = gaLine(ex, sub), top = rows.length + 1;
+    var r1 = [{ v: sub, s: 'sb' }, { v: '优秀人数', s: 't' }];
+    var r2 = [{ v: '', s: 'sb' }, { v: '优秀率', s: 't' }];
+    var r3 = [{ v: '', s: 'sb' }, { v: '及格人数', s: 't' }];
+    var r4 = [{ v: '', s: 'sb' }, { v: '及格率', s: 't' }];
+    cls.forEach(function(cl) {
+      var ce = gaRateCount(ex, cl, sub, L.ex), cp = gaRateCount(ex, cl, sub, L.pass);
+      r1.push({ v: ce.hit, s: 'i' });
+      r2.push({ v: xaPct(ce.n ? ce.hit / ce.n : null), s: 'p' });
+      r3.push({ v: cp.hit, s: 'i' });
+      r4.push({ v: xaPct(cp.n ? cp.hit / cp.n : null), s: 'p' });
+    });
+    var te = gaRateCount(ex, '', sub, L.ex), tp = gaRateCount(ex, '', sub, L.pass);
+    r1.push({ v: te.hit, s: 'bi' });
+    r2.push({ v: xaPct(te.n ? te.hit / te.n : null), s: 'bp' });
+    r3.push({ v: tp.hit, s: 'bi' });
+    r4.push({ v: xaPct(tp.n ? tp.hit / tp.n : null), s: 'bp' });
+    rows.push(r1, r2, r3, r4);
+    merges.push('A' + top + ':A' + (top + 3));
+  });
+
+  return xaSheet('优秀率合格率', cols, rows, { freeze: 2, merges: merges });
+}
+
+// 学校质量分析模板 · 第二页：班级总表（总分优秀 / 合格 / 低分 / 全科合格）
+function xaClassSummarySheet(ex) {
+  var cls = gaClasses(), TL = gaLine(ex, GA_TOTAL), lowT = gaLowLine(TL.pass);
+  var cols = [16];
+  cls.forEach(function() { cols.push(9); });
+  cols.push(10);
+
+  var head = [{ v: '', s: 'h' }];
+  cls.forEach(function(c) { head.push({ v: c, s: 'h' }); });
+  head.push({ v: '年级合计', s: 'h' });
+  var rows = [head];
+
+  function put(label, fn, isRate, hl) {
+    var r = [{ v: label, s: hl ? 'sb' : 't' }];
+    cls.concat(['']).forEach(function(c) {
+      if (isRate) r.push({ v: xaPct(fn(c)), s: hl ? 'bp' : 'p' });
+      else r.push({ v: xaInt(fn(c)), s: hl ? 'bi' : 'i' });
+    });
+    rows.push(r);
+  }
+
+  put('参考人数', function(c) { return gaRefCount(ex, c); });
+  put(TL.ex + '以上优秀人数', function(c) { return gaTotalCount(ex, c, TL.ex).hit; });
+  put('总分优秀率', function(c) { return gaTotalRateOf(ex, c, TL.ex); }, true);
+  put(TL.pass + '以上合格人数', function(c) { return gaTotalCount(ex, c, TL.pass).hit; });
+  put(TL.pass + '以下不合格人数', function(c) { var t = gaTotalCount(ex, c, TL.pass); return t.n - t.hit; });
+  put('总分合格率', function(c) { return gaTotalRateOf(ex, c, TL.pass); }, true);
+  put(lowT + '以下低分人数', function(c) { var t = gaTotalCount(ex, c, lowT); return t.n - t.hit; });
+  put('总分低分率', function(c) { var t = gaTotalCount(ex, c, lowT); return t.n ? (t.n - t.hit) / t.n : null; }, true);
+  put('全科合格人数', function(c) { return gaAllPassCount(ex, c).ok; });
+  put('全科合格率', function(c) { return gaAllPassRate(ex, c); }, true, true);
+
+  return xaSheet('班级总表', cols, rows, { freeze: 1 });
+}
+
 function xaSegSheet(ex) {
   var cls = gaClasses(), ths = gaSegThresholds().slice(0, 40);
   var cols = [11];
   ths.forEach(function() { cols.push(9); });
-  cols.push(10);
+  cols.push(9);
+  cols.push(8);
 
   var head = [{ v: '班级', s: 'h' }];
   ths.forEach(function(t) { head.push({ v: t + '分以上', s: 'h' }); });
-  head.push({ v: '班级人数', s: 'h' });
+  head.push({ v: '参考人数', s: 'h' });
+  head.push({ v: '缺考', s: 'h' });
   var rows = [head];
 
   cls.forEach(function(c) {
     var r = [{ v: c, s: 't' }];
     ths.forEach(function(t) { r.push({ v: gaSegCount(ex, c, t), s: 'i' }); });
-    r.push({ v: gaClassSize(ex, c), s: 'i' });
+    r.push({ v: gaRefCount(ex, c), s: 'i' });
+    r.push({ v: gaMissCount(ex, c), s: 'i' });
     rows.push(r);
   });
 
   var sr = [{ v: '全校', s: 'bt' }];
   ths.forEach(function(t) { sr.push({ v: gaSegCount(ex, '', t), s: 'bi' }); });
-  sr.push({ v: gaClassSize(ex, ''), s: 'bi' });
+  sr.push({ v: gaRefCount(ex, ''), s: 'bi' });
+  sr.push({ v: gaMissCount(ex, ''), s: 'bi' });
   rows.push(sr);
 
   return xaSheet('分数段', cols, rows, { freeze: 1 });
@@ -7556,6 +7791,8 @@ function gaExportXlsxOpen() {
     ['roster', '学生名单', '姓名、班级、考试号、各科成绩、总分、年级排名、进步率、全科合格'],
     ['avg', '各科均分', '各班各科均分 + 班级名次，下方附「与上次考试的差值」'],
     ['rate', '各科优秀率 / 合格率', '两张表，含任课教师，末行为全校汇总'],
+    ['rate2', '优秀率合格率（模板第一页）', '分科：参考人数 + 优秀/及格人数与率，按班级横向排列'],
+    ['summary', '班级总表（模板第二页）', '总分优秀/合格/低分人数与率、全科合格人数与率'],
     ['seg', '分数段', '总分各分数段（累计人数）'],
     ['rank', '成绩排名', '按年级名次排序的学生明细']
   ];
@@ -7564,7 +7801,7 @@ function gaExportXlsxOpen() {
   var body = '<div class="modal-header"><h3>⬇ 导出 Excel</h3>' +
     '<button class="modal-close" onclick="closeModalForce()">×</button></div>' +
     '<div class="modal-body">' +
-    '<p class="ga-tip" style="margin:0 0 12px">按《期末考试质量分析 2026.06》的版式生成真正的 .xlsx 文件，Excel / WPS 均可直接打开（无“格式与扩展名不符”提示）。勾选要导出的工作表：</p>' +
+    '<p class="ga-tip" style="margin:0 0 12px">按学校《质量分析》模板版式生成真正的 .xlsx 文件，Excel / WPS 均可直接打开（无“格式与扩展名不符”提示）。勾选要导出的工作表：</p>' +
     '<div style="border:1px solid var(--border);border-radius:10px;padding:6px 14px;margin-bottom:14px">';
   items.forEach(function(it, i) {
     body += '<label style="display:flex;align-items:center;gap:9px;padding:7px 0;' +
@@ -7606,6 +7843,8 @@ function gaExportXlsxRun() {
     if (pick.roster) sheets.push(xaRosterSheet(ex));
     if (pick.avg) sheets.push(xaAvgSheet(ex, '各科均分', true));
     if (pick.rate) { sheets.push(xaRateSheet(ex, 'ex')); sheets.push(xaRateSheet(ex, 'pass')); }
+    if (pick.rate2) sheets.push(xaRateDocSheet(ex));
+    if (pick.summary) sheets.push(xaClassSummarySheet(ex));
     if (pick.seg) sheets.push(xaSegSheet(ex));
     if (pick.rank) sheets.push(xaRankSheet(ex));
     if (pick.cmp) {
